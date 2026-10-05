@@ -1,0 +1,21 @@
+[project]
+name = "client"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "dafrog418ripe", email = "nicolas@percula.net" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "google-genai>=2.28.0",
+    "mcp[cli]>=2.3.0",
+    "python-dotenv>=1.2.4",
+]
+
+[project.scripts]
+client = "client:main"
+
+[build-system]
+requires = ["uv_build>=0.12.23,<0.13.0"]
+build-backend = "uv_build"
