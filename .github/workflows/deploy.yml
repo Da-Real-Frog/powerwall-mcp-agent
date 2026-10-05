@@ -1,0 +1,26 @@
+name: Deploy MCP Server
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'server/**'
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Build and Run Docker Container
+        run: |
+          docker build -t powerwall-mcp-server ./server
+          docker stop mcp-server || true
+          docker rm mcp-server || true
+          docker run -d \
+            --name mcp-server \
+            --env-file ./server/.env \
+            --restart unless-stopped \
+            -p 8000:8000 \
+            powerwall-mcp-server
