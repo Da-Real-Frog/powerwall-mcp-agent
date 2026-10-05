@@ -20,7 +20,7 @@ jobs:
           docker rm mcp-server || true
           docker run -d \
             --name mcp-server \
-            --env-file /etc/mcp-server/.env \
+            --env-file /home/nicolaskelelr/mcp-server.env \
             --restart unless-stopped \
             -p 8000:8000 \
             powerwall-mcp-server
