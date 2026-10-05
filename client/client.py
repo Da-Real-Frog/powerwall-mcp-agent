@@ -1,28 +1,31 @@
 import os
 import json
 import asyncio
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+from mcp import ClientSession
+from mcp.client.sse import sse_client
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
 
-# Load GEMINI_API_KEY from .env
+# Load environment variables from .env
 load_dotenv()
 
 async def run_agent():
-    server_params = StdioServerParameters(
-        command="uv",
-        args=["run", "--directory", "../server/src/server", "server.py"]
-    )
+    # Fetch the server URL from the .env file
+    server_url = os.getenv("MCP_SERVER_URL")
+    
+    if not server_url:
+        raise ValueError("❌ MCP_SERVER_URL is not defined in the .env file.")
 
-    print("🔌 Starting MCP Server subprocess and establishing connection...")
-    async with stdio_client(server_params) as (read, write):
+    print(f"🔌 Connecting to remote MCP Server at {server_url}...")
+    
+    # Connect over the network using SSE
+    async with sse_client(server_url) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
-            print("✅ MCP Session initialized.\n")
+            print("✅ Remote MCP Session initialized.\n")
             
-         # 1. Discover tools dynamically from the MCP server
+            # 1. Discover tools dynamically from the MCP server
             mcp_tools = await session.list_tools()
             gemini_function_declarations = []
             
@@ -39,7 +42,6 @@ async def run_agent():
                         parameters=schema
                     )
                 )
-
             
             agent_tools = types.Tool(function_declarations=gemini_function_declarations)
             
