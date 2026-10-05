@@ -11,3 +11,4 @@ Ensure your `.env` file contains:
 - `PW_HOST`, `PW_PASSWORD`, `PW_EMAIL`
 - `SOLAR_LAT`, `SOLAR_LON`
 - Array specs (`SOLAR_DEC_1/2/3`, `SOLAR_AZ_1/2/3`, `SOLAR_KWP_1/2/3`)
+
