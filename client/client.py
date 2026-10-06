@@ -72,9 +72,12 @@ async def run_agent():
             )
             
             prompt = (
-                "You are my home energy manager. Evaluate my power situation. "
-                "Check my current battery level, then check the solar forecast across my 3 arrays. "
-                "Synthesize this data and tell me if I need to charge my Powerwalls from the grid tonight."
+                "You are my home energy manager. Evaluate my power situation for tonight.\n"
+                "1. Check my current battery level.\n"
+                "2. Check the solar forecast across my 3 arrays.\n"
+                "3. Check for active National Weather Service alerts.\n"
+                "Synthesize this data. If there are severe weather warnings (like storms or freezes) that could threaten grid stability, "
+                "prioritize backup readiness over cost and recommend charging the Powerwalls. Otherwise, base your recommendation on the solar forecast and give me an idea of what percentage I should use as a reserve."
             )
             print(f"👤 User: {prompt}\n")
             
