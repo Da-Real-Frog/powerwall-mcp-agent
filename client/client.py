@@ -12,19 +12,49 @@ from dotenv import load_dotenv
 load_dotenv()
 
 async def send_message_with_retry(chat, message, max_retries=4, initial_delay=5):
-    """Sends a message to the Gemini chat session with exponential backoff on 503/transient errors."""
+    """Sends a message with smart quota parsing and exponential backoff."""
     for attempt in range(1, max_retries + 1):
         try:
             return chat.send_message(message)
         except (ServerError, APIError) as e:
-            print(f"⚠️ Gemini API error: {e.message if hasattr(e, 'message') else e}")
+            error_msg = e.message if hasattr(e, 'message') else str(e)
+            
+            # 1. Handle Hard Quota Limits (429)
+            if "Quota exceeded" in error_msg or "429" in error_msg:
+                print(f"\n⚠️ Gemini API Quota Exceeded")
+                
+                # Parse the "retry in 1h30m23.8s" string
+                match = re.search(r'retry in (?:(\d+)h)?(?:(\d+)m)?(?:([\d.]+)s)?', error_msg)
+                if match:
+                    hours = int(match.group(1) or 0)
+                    minutes = int(match.group(2) or 0)
+                    seconds = float(match.group(3) or 0.0)
+                    wait_seconds = (hours * 3600) + (minutes * 60) + seconds
+                    
+                    # If the wait is longer than 2 minutes, abort to prevent an SSE timeout
+                    if wait_seconds > 120:
+                        print(f"❌ Wait time ({wait_seconds/60:.1f} minutes) is too long.")
+                        print("Holding the connection open will cause a network timeout.")
+                        print("Please close the script and run it again later.")
+                        sys.exit(1)
+                        
+                    print(f"⏳ Sleeping for {wait_seconds:.1f} seconds to reset quota...")
+                    await asyncio.sleep(wait_seconds + 1)
+                    continue
+                else:
+                    print("❌ Quota exceeded with unknown wait format. Exiting.")
+                    sys.exit(1)
+            
+            # 2. Handle Transient Server Demand (503)
+            print(f"⚠️ Gemini API error: {error_msg}")
             if attempt < max_retries:
                 wait_time = initial_delay * (2 ** (attempt - 1))
-                print(f"⏳ API is experiencing high demand. Retrying in {wait_time}s (Attempt {attempt}/{max_retries})...")
+                print(f"⏳ Transient error. Retrying in {wait_time}s (Attempt {attempt}/{max_retries})...")
                 await asyncio.sleep(wait_time)
             else:
-                print("❌ Max retries reached. Gemini API remains unavailable. Try again shortly.")
-                raise
+                print("❌ Max retries reached. Exiting.")
+                sys.exit(1)
+
 
 async def run_agent():
     # Fetch the server URL from the .env file
