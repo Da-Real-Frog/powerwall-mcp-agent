@@ -1,3 +1,5 @@
+import httpx
+import json
 import os
 import requests
 import pypowerwall
@@ -39,53 +41,77 @@ def get_powerwall_status() -> dict:
 
 # --- TOOL 2: Multi-Array Solar Weather Forecast ---
 @mcp.tool()
-def get_solar_forecast() -> dict:
-    """
-    Fetches estimated solar generation across three roof arrays 
-    and returns the combined hourly wattage and daily totals.
-    """
-    lat = os.environ.get("SOLAR_LAT")
-    lon = os.environ.get("SOLAR_LON")
+def get_solar_forecast() -> str:
+    """Returns the forecasted total solar generation in Watts for the next 48 hours."""
     
-    # Collect configurations for up to 3 arrays
-    arrays = [
-        (os.environ.get("SOLAR_DEC_1"), os.environ.get("SOLAR_AZ_1"), os.environ.get("SOLAR_KWP_1")),
-        (os.environ.get("SOLAR_DEC_2"), os.environ.get("SOLAR_AZ_2"), os.environ.get("SOLAR_KWP_2")),
-        (os.environ.get("SOLAR_DEC_3"), os.environ.get("SOLAR_AZ_3"), os.environ.get("SOLAR_KWP_3"))
-    ]
-
-    combined_watts = {}
-    total_watt_hours_day = {}
-
+    # Load configuration from existing environment variables
     try:
-        for dec, az, kwp in arrays:
-            # Skip any array configuration that is missing in .env
-            if not all([dec, az, kwp]):
-                continue
-                
-            url = f"https://api.forecast.solar/estimate/{lat}/{lon}/{dec}/{az}/{kwp}"
-            response = requests.get(url, headers={"Accept": "application/json"})
-            response.raise_for_status()
-            
-            data = response.json().get("result", {})
-            watts = data.get("watts", {})
-            wh_days = data.get("watt_hours_day", {})
-            
-            # Aggregate hourly watt estimates
-            for time_stamp, watt_val in watts.items():
-                combined_watts[time_stamp] = combined_watts.get(time_stamp, 0) + watt_val
-                
-            # Aggregate daily watt-hour totals
-            for day, wh_val in wh_days.items():
-                total_watt_hours_day[day] = total_watt_hours_day.get(day, 0) + wh_val
+        LAT = os.getenv("SOLAR_LAT", "0.0")
+        LON = os.getenv("SOLAR_LON", "0.0")
+        
+        # Tilts (Declination)
+        DEC_1 = os.getenv("SOLAR_DEC_1", "44")
+        DEC_2 = os.getenv("SOLAR_DEC_2", "30")
+        DEC_3 = os.getenv("SOLAR_DEC_3", "30")
+        
+        # Azimuths
+        AZ_1 = os.getenv("SOLAR_AZ_1", "30")
+        AZ_2 = os.getenv("SOLAR_AZ_2", "30")
+        AZ_3 = os.getenv("SOLAR_AZ_3", "120")
+        
+        # Capacities in kW
+        KWP_1 = float(os.getenv("SOLAR_KWP_1", "0.0"))
+        KWP_2 = float(os.getenv("SOLAR_KWP_2", "0.0"))
+        KWP_3 = float(os.getenv("SOLAR_KWP_3", "0.0"))
+    except ValueError:
+        return json.dumps({"status": "error", "message": "Invalid solar capacity values in .env"})
 
-        return {
-            "success": True,
-            "forecast_watts_per_hour": combined_watts,
-            "summary_watt_hours_per_day": total_watt_hours_day
-        }
+    # Format parameters for Open-Meteo
+    tilts = f"{DEC_1},{DEC_2},{DEC_3}"
+    azimuths = f"{AZ_1},{AZ_2},{AZ_3}"
+
+    url = (
+        "https://api.open-meteo.com/v1/forecast"
+        f"?latitude={LAT},{LAT},{LAT}"
+        f"&longitude={LON},{LON},{LON}"
+        "&hourly=global_tilted_irradiance"
+        f"&tilt={tilts}"
+        f"&azimuth={azimuths}"
+        "&timezone=America%2FChicago"
+        "&forecast_days=2"
+    )
+    
+    try:
+        response = httpx.get(url, timeout=10.0)
+        response.raise_for_status() 
+        raw_data = response.json()
+        
+        # Extract the GTI for all 3 arrays
+        array_1_gti = raw_data[0]["hourly"]["global_tilted_irradiance"]
+        array_2_gti = raw_data[1]["hourly"]["global_tilted_irradiance"]
+        array_3_gti = raw_data[2]["hourly"]["global_tilted_irradiance"]
+        times = raw_data[0]["hourly"]["time"]
+        
+        forecast = []
+        # Calculate actual Watts based on system kW size
+        for i in range(len(times)):
+            array_1_watts = array_1_gti[i] * KWP_1
+            array_2_watts = array_2_gti[i] * KWP_2
+            array_3_watts = array_3_gti[i] * KWP_3
+            
+            total_watts = round(array_1_watts + array_2_watts + array_3_watts)
+            
+            # Filter out the night to save LLM tokens
+            if total_watts > 0:
+                forecast.append({
+                    "time": times[i],
+                    "expected_watts": total_watts
+                })
+                
+        return json.dumps({"status": "success", "forecast": forecast})
+        
     except Exception as e:
-        return {"error": f"Failed to fetch combined solar forecast: {str(e)}"}
+        return json.dumps({"status": "error", "message": f"Forecast failed: {str(e)}"})
 
 
 if __name__ == "__main__":
