@@ -90,5 +90,4 @@ def get_solar_forecast() -> dict:
 
 if __name__ == "__main__":
     # Binds the server to all network interfaces on port 8000
-    mcp.run(transport="http", host="0.0.0.0", port=8000)
-    mcp.run()
+    mcp.run(transport="sse", host="0.0.0.0", port=8000)
