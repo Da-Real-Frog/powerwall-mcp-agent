@@ -113,6 +113,46 @@ def get_solar_forecast() -> str:
     except Exception as e:
         return json.dumps({"status": "error", "message": f"Forecast failed: {str(e)}"})
 
+#tool 3 - Get alerts and watches
+@mcp.tool()
+def get_active_weather_alerts() -> str:
+    """Returns active National Weather Service (NWS) alerts, watches, and warnings for the home location."""
+    try:
+        LAT = os.getenv("SOLAR_LAT", "0.0")
+        LON = os.getenv("SOLAR_LON", "0.0")
+        EMAIL = os.getenv("PW_EMAIL", "home-energy-agent@local")
+    except ValueError:
+        return json.dumps({"status": "error", "message": "Invalid coordinates in .env"})
+
+    # NWS API endpoint for alerts based on GPS coordinates
+    url = f"https://api.weather.gov/alerts/active?point={LAT},{LON}"
+    
+    # NWS strongly requests a unique User-Agent header with contact info
+    headers = {"User-Agent": f"Powerwall-MCP-Agent, contact: {EMAIL}"}
+    
+    try:
+        response = httpx.get(url, headers=headers, timeout=10.0)
+        response.raise_for_status()
+        data = response.json()
+        
+        alerts = []
+        for feature in data.get("features", []):
+            props = feature.get("properties", {})
+            alerts.append({
+                "event": props.get("event"),           # e.g., "Severe Thunderstorm Warning"
+                "severity": props.get("severity"),     # e.g., "Severe", "Extreme"
+                "urgency": props.get("urgency"),       # e.g., "Immediate", "Expected"
+                "headline": props.get("headline")      # Detailed summary
+            })
+        
+        if not alerts:
+            return json.dumps({"status": "success", "message": "No active weather alerts. Weather is clear."})
+            
+        return json.dumps({"status": "success", "alerts": alerts})
+        
+    except Exception as e:
+        return json.dumps({"status": "error", "message": f"NWS API request failed: {str(e)}"})
+
 
 if __name__ == "__main__":
     # Binds the server to all network interfaces on port 8000
