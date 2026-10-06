@@ -5,10 +5,26 @@ from mcp import ClientSession
 from mcp.client.sse import sse_client
 from google import genai
 from google.genai import types
+from google.genai.errors import APIError, ServerError
 from dotenv import load_dotenv
 
 # Load environment variables from .env
 load_dotenv()
+
+async def send_message_with_retry(chat, message, max_retries=4, initial_delay=5):
+    """Sends a message to the Gemini chat session with exponential backoff on 503/transient errors."""
+    for attempt in range(1, max_retries + 1):
+        try:
+            return chat.send_message(message)
+        except (ServerError, APIError) as e:
+            print(f"⚠️ Gemini API error: {e.message if hasattr(e, 'message') else e}")
+            if attempt < max_retries:
+                wait_time = initial_delay * (2 ** (attempt - 1))
+                print(f"⏳ API is experiencing high demand. Retrying in {wait_time}s (Attempt {attempt}/{max_retries})...")
+                await asyncio.sleep(wait_time)
+            else:
+                print("❌ Max retries reached. Gemini API remains unavailable. Try again shortly.")
+                raise
 
 async def run_agent():
     # Fetch the server URL from the .env file
@@ -63,7 +79,7 @@ async def run_agent():
             print(f"👤 User: {prompt}\n")
             
             # 3. Agent Execution Loop
-            response = chat.send_message(prompt)
+            response = await send_message_with_retry(chat, prompt)
             
             while response.function_calls:
                 for call in response.function_calls:
@@ -75,8 +91,9 @@ async def run_agent():
                     # Extract the JSON string from the MCP TextContent block
                     tool_output_string = result.content[0].text
                     
-                    # Feed the raw telemetry back to the LLM
-                    response = chat.send_message(
+                    # Feed the raw telemetry back to the LLM using the retry wrapper
+                    response = await send_message_with_retry(
+                        chat,
                         types.Part.from_function_response(
                             name=call.name,
                             response={"result": json.loads(tool_output_string)}
