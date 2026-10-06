@@ -55,7 +55,7 @@ async def send_message_with_retry(chat, message, max_retries=4, initial_delay=5)
                 await asyncio.sleep(wait_time)
             else:
                 print("❌ Max retries reached. Exiting.")
-                sys.exit(1)
+                os._exit(1)
 
 
 async def run_agent():
