@@ -8,3 +8,5 @@ An enterprise AI workflow lab integrating Model Context Protocol (MCP), local Te
 ## Project Structure
 - `server/`: Python FastMCP server handling local Powerwall queries and 3-array solar estimation.
 - `client/`: Gemini-powered agent client orchestrating autonomous energy management decisions.
+
+More to follow as I will then start collecting the status of all strings and compare them again the solar forecast...
