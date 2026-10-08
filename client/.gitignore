@@ -7,3 +7,5 @@
 **/__pycache__/
 *.pyc
 uv.lock
+#Mac internals
+.DS_Store
