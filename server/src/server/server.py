@@ -48,68 +48,57 @@ def get_solar_forecast() -> str:
     try:
         LAT = os.getenv("SOLAR_LAT", "0.0")
         LON = os.getenv("SOLAR_LON", "0.0")
-        
-        # Tilts (Declination)
-        DEC_1 = os.getenv("SOLAR_DEC_1", "44")
-        DEC_2 = os.getenv("SOLAR_DEC_2", "30")
-        DEC_3 = os.getenv("SOLAR_DEC_3", "30")
-        
-        # Azimuths
-        AZ_1 = os.getenv("SOLAR_AZ_1", "30")
-        AZ_2 = os.getenv("SOLAR_AZ_2", "30")
-        AZ_3 = os.getenv("SOLAR_AZ_3", "120")
-        
-        # Capacities in kW
-        KWP_1 = float(os.getenv("SOLAR_KWP_1", "0.0"))
-        KWP_2 = float(os.getenv("SOLAR_KWP_2", "0.0"))
-        KWP_3 = float(os.getenv("SOLAR_KWP_3", "0.0"))
+
+        # (tilt, azimuth, capacity in kW) for each array
+        arrays = [
+            (float(os.getenv("SOLAR_DEC_1", "44")), float(os.getenv("SOLAR_AZ_1", "30")), float(os.getenv("SOLAR_KWP_1", "0.0"))),
+            (float(os.getenv("SOLAR_DEC_2", "30")), float(os.getenv("SOLAR_AZ_2", "30")), float(os.getenv("SOLAR_KWP_2", "0.0"))),
+            (float(os.getenv("SOLAR_DEC_3", "30")), float(os.getenv("SOLAR_AZ_3", "120")), float(os.getenv("SOLAR_KWP_3", "0.0"))),
+        ]
     except ValueError:
-        return json.dumps({"status": "error", "message": "Invalid solar capacity values in .env"})
+        return json.dumps({"status": "error", "message": "Invalid solar tilt, azimuth or capacity values in .env"})
 
-    # Format parameters for Open-Meteo
-    tilts = f"{DEC_1},{DEC_2},{DEC_3}"
-    azimuths = f"{AZ_1},{AZ_2},{AZ_3}"
-
-    url = (
-        "https://api.open-meteo.com/v1/forecast"
-        f"?latitude={LAT},{LAT},{LAT}"
-        f"&longitude={LON},{LON},{LON}"
-        "&hourly=global_tilted_irradiance"
-        f"&tilt={tilts}"
-        f"&azimuth={azimuths}"
-        "&timezone=America%2FChicago"
-        "&forecast_days=2"
-    )
-    
     try:
-        response = httpx.get(url, timeout=10.0)
-        response.raise_for_status() 
-        raw_data = response.json()
-        
-        # Extract the GTI for all 3 arrays
-        array_1_gti = raw_data[0]["hourly"]["global_tilted_irradiance"]
-        array_2_gti = raw_data[1]["hourly"]["global_tilted_irradiance"]
-        array_3_gti = raw_data[2]["hourly"]["global_tilted_irradiance"]
-        times = raw_data[0]["hourly"]["time"]
-        
+        times = []
+        total_watts = []
+
+        # Open-Meteo only accepts a single tilt/azimuth per request, so each array is its own call
+        for tilt, azimuth, kwp in arrays:
+            response = httpx.get(
+                "https://api.open-meteo.com/v1/forecast",
+                params={
+                    "latitude": LAT,
+                    "longitude": LON,
+                    "hourly": "global_tilted_irradiance",
+                    "tilt": tilt,
+                    "azimuth": azimuth,
+                    "timezone": PW_TIMEZONE,
+                    "forecast_days": 2,
+                },
+                timeout=10.0,
+            )
+            response.raise_for_status()
+            hourly = response.json()["hourly"]
+
+            times = hourly["time"]
+            if not total_watts:
+                total_watts = [0.0] * len(times)
+
+            # Calculate actual Watts based on system kW size
+            for i, gti in enumerate(hourly["global_tilted_irradiance"]):
+                total_watts[i] += (gti or 0) * kwp
+
         forecast = []
-        # Calculate actual Watts based on system kW size
-        for i in range(len(times)):
-            array_1_watts = array_1_gti[i] * KWP_1
-            array_2_watts = array_2_gti[i] * KWP_2
-            array_3_watts = array_3_gti[i] * KWP_3
-            
-            total_watts = round(array_1_watts + array_2_watts + array_3_watts)
-            
+        for time, watts in zip(times, total_watts):
             # Filter out the night to save LLM tokens
-            if total_watts > 0:
+            if round(watts) > 0:
                 forecast.append({
-                    "time": times[i],
-                    "expected_watts": total_watts
+                    "time": time,
+                    "expected_watts": round(watts)
                 })
-                
+
         return json.dumps({"status": "success", "forecast": forecast})
-        
+
     except Exception as e:
         return json.dumps({"status": "error", "message": f"Forecast failed: {str(e)}"})
 

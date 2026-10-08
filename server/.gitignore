@@ -1,11 +1,11 @@
 # Environment variables and secrets
 .env
 **/.env
+.powerwall
 
 # Python virtual environments and caches
 .venv/
 **/__pycache__/
 *.pyc
-uv.lock
 #Mac internals
 .DS_Store
