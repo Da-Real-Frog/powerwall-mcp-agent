@@ -59,8 +59,10 @@ def get_active_weather_alerts() -> dict:
 
 
 def main() -> None:
-    # Streamable HTTP on all interfaces; clients connect to http://<host>:8000/mcp
-    mcp.run(transport="http", host="0.0.0.0", port=8000)
+    # Streamable HTTP on all interfaces; clients connect to http://<host>:8000/mcp.
+    # Every reply is a plain JSON body with no per-session stream: the tools are simple
+    # request/response calls, and proxies (such as MCP Inspector's) can drop streamed replies.
+    mcp.run(transport="http", host="0.0.0.0", port=8000, json_response=True, stateless_http=True)
 
 
 if __name__ == "__main__":
