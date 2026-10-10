@@ -1,7 +1,7 @@
 [project]
 name = "client"
 version = "0.1.0"
-description = "Add your description here"
+description = "Agent client that asks Gemini or Claude about the Powerwall using the MCP server's tools"
 readme = "README.md"
 authors = [
     { name = "dafrog418ripe", email = "nicolas@percula.net" }
@@ -14,9 +14,22 @@ dependencies = [
     "python-dotenv>=1.2.4",
 ]
 
-[project.scripts]
-client = "client:main"
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+]
 
-[build-system]
-requires = ["uv_build>=0.12.23,<0.13.0"]
-build-backend = "uv_build"
+# client.py is run directly with `uv run client.py`; there is no package to build
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B"]

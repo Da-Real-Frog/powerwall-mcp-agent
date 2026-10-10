@@ -1,62 +1,76 @@
-import os
-import json
 import asyncio
+import json
+import os
 import re
 import sys
-from mcp import ClientSession
-from mcp.client.sse import sse_client
+
 import anthropic
+from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 from google.genai.errors import APIError, ServerError
-from dotenv import load_dotenv
+from mcp import ClientSession
+from mcp.client.streamable_http import streamable_http_client
 
 # Load environment variables from .env
 load_dotenv()
 
 async def send_message_with_retry(chat, message, max_retries=4, initial_delay=5):
-    """Sends a message with smart quota parsing and exponential backoff."""
+    """Sends a message with smart quota parsing and exponential backoff. Exits if every attempt fails."""
     for attempt in range(1, max_retries + 1):
         try:
-            return chat.send_message(message)
+            return await chat.send_message(message)
         except (ServerError, APIError) as e:
             error_msg = e.message if hasattr(e, 'message') else str(e)
-            
+
             # 1. Handle Hard Quota Limits (429)
             if "Quota exceeded" in error_msg or "429" in error_msg:
-                print(f"\n⚠️ Gemini API Quota Exceeded")
-                
+                print("\n⚠️ Gemini API Quota Exceeded")
+
                 # Parse the "retry in 1h30m23.8s" string
                 match = re.search(r'retry in (?:(\d+)h)?(?:(\d+)m)?(?:([\d.]+)s)?', error_msg)
-                if match:
-                    hours = int(match.group(1) or 0)
-                    minutes = int(match.group(2) or 0)
-                    seconds = float(match.group(3) or 0.0)
-                    wait_seconds = (hours * 3600) + (minutes * 60) + seconds
-                    
-                    # If the wait is longer than 2 minutes, abort to prevent an SSE timeout
-                    if wait_seconds > 120:
-                        print(f"❌ Wait time ({wait_seconds/60:.1f} minutes) is too long.")
-                        print("Holding the connection open will cause a network timeout.")
-                        print("Please close the script and run it again later.")
-                        sys.exit(1)
-                        
-                    print(f"⏳ Sleeping for {wait_seconds:.1f} seconds to reset quota...")
-                    await asyncio.sleep(wait_seconds + 1)
-                    continue
-                else:
+                if not match:
                     print("❌ Quota exceeded with unknown wait format. Exiting.")
                     sys.exit(1)
-            
+
+                hours = int(match.group(1) or 0)
+                minutes = int(match.group(2) or 0)
+                seconds = float(match.group(3) or 0.0)
+                wait_seconds = (hours * 3600) + (minutes * 60) + seconds
+
+                # If the wait is longer than 2 minutes, abort to prevent a connection timeout
+                if wait_seconds > 120:
+                    print(f"❌ Wait time ({wait_seconds/60:.1f} minutes) is too long.")
+                    print("Please close the script and run it again later.")
+                    sys.exit(1)
+
+                if attempt < max_retries:
+                    print(f"⏳ Sleeping for {wait_seconds:.1f} seconds to reset quota...")
+                    await asyncio.sleep(wait_seconds + 1)
+                continue
+
             # 2. Handle Transient Server Demand (503)
             print(f"⚠️ Gemini API error: {error_msg}")
             if attempt < max_retries:
                 wait_time = initial_delay * (2 ** (attempt - 1))
                 print(f"⏳ Transient error. Retrying in {wait_time}s (Attempt {attempt}/{max_retries})...")
                 await asyncio.sleep(wait_time)
-            else:
-                print("❌ Max retries reached. Exiting.")
-                os._exit(1)
+
+    print("❌ Max retries reached. Exiting.")
+    sys.exit(1)
+
+
+def tool_result_payload(result) -> dict:
+    """Turns an MCP tool result into the dict Gemini expects, keeping tool errors visible to the model."""
+    text = "\n".join(c.text for c in result.content if c.type == "text")
+    if result.is_error:
+        return {"error": text}
+    if result.structured_content is not None:
+        return {"result": result.structured_content}
+    try:
+        return {"result": json.loads(text)}
+    except json.JSONDecodeError:
+        return {"result": text}
 
 
 PROMPT = (
@@ -64,8 +78,9 @@ PROMPT = (
     "1. Check my current battery level.\n"
     "2. Check the solar forecast across my 3 arrays.\n"
     "3. Check for active National Weather Service alerts.\n"
-    "Synthesize this data. If there are severe weather warnings (like storms or freezes) that could threaten grid stability, "
-    "prioritize backup readiness over cost and recommend charging the Powerwalls. Otherwise, base your recommendation on the solar forecast and give me an idea of what percentage I should use as a reserve."
+    "Synthesize this data. If there are severe weather warnings (like storms or freezes) that could threaten "
+    "grid stability, prioritize backup readiness over cost and recommend charging the Powerwalls. Otherwise, "
+    "base your recommendation on the solar forecast and give me an idea of what percentage I should use as a reserve."
 )
 
 
@@ -90,7 +105,7 @@ async def run_gemini(session, mcp_tools, prompt):
     agent_tools = types.Tool(function_declarations=gemini_function_declarations)
 
     client = genai.Client()
-    chat = client.chats.create(
+    chat = client.aio.chats.create(
         model=os.getenv("GEMINI_MODEL", "gemini-3.8-flash"),
         config=types.GenerateContentConfig(
             tools=[agent_tools],
@@ -101,23 +116,16 @@ async def run_gemini(session, mcp_tools, prompt):
     response = await send_message_with_retry(chat, prompt)
 
     while response.function_calls:
+        # Gemini may ask for several tools at once; all their results go back in one message
+        parts = []
         for call in response.function_calls:
             print(f"🤖 Agent is executing tool: [{call.name}]")
 
             # Execute the requested tool via the MCP session
-            result = await session.call_tool(call.name, call.args)
+            result = await session.call_tool(call.name, call.args or {})
+            parts.append(types.Part.from_function_response(name=call.name, response=tool_result_payload(result)))
 
-            # Extract the JSON string from the MCP TextContent block
-            tool_output_string = result.content[0].text
-
-            # Feed the raw telemetry back to the LLM using the retry wrapper
-            response = await send_message_with_retry(
-                chat,
-                types.Part.from_function_response(
-                    name=call.name,
-                    response={"result": json.loads(tool_output_string)}
-                )
-            )
+        response = await send_message_with_retry(chat, parts)
 
     return response.text
 
@@ -202,13 +210,15 @@ async def run_agent():
 
     if not server_url:
         raise ValueError("❌ MCP_SERVER_URL is not defined in the .env file.")
+    if server_url.rstrip("/").endswith("/sse"):
+        raise ValueError("❌ The server now uses streamable HTTP: change MCP_SERVER_URL from .../sse to .../mcp.")
     if provider not in PROVIDERS:
         raise ValueError(f"❌ LLM_PROVIDER must be one of {sorted(PROVIDERS)}, got '{provider}'.")
 
     print(f"🔌 Connecting to remote MCP Server at {server_url}...")
 
-    # Connect over the network using SSE
-    async with sse_client(server_url) as (read, write):
+    # Connect over the network using streamable HTTP
+    async with streamable_http_client(server_url) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             print("✅ Remote MCP Session initialized.\n")
@@ -224,5 +234,9 @@ async def run_agent():
 
             print(f"\n🧠 Agent Final Report:\n{report}")
 
-if __name__ == "__main__":
+def main() -> None:
     asyncio.run(run_agent())
+
+
+if __name__ == "__main__":
+    main()

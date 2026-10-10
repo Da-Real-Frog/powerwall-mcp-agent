@@ -22,5 +22,6 @@ jobs:
             --name mcp-server \
             --env-file /home/nicolaskeller/mcp-server.env \
             --restart unless-stopped \
+            -v powerwall-data:/data \
             -p 8000:8000 \
             powerwall-mcp-server

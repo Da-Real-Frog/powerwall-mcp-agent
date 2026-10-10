@@ -1,39 +1,45 @@
 # Powerwall & Solar MCP Server
 
-An MCP (Model Context Protocol) server built with Python and FastMCP that exposes local Powerwall telemetry, a solar forecast and weather alerts as standardized tools. It serves SSE on port 8000.
+An MCP (Model Context Protocol) server built with Python and FastMCP that exposes local Powerwall telemetry, a solar forecast and weather alerts as read-only tools. It serves streamable HTTP on port 8000 at `/mcp`.
 
 ## Tools Provided
-1. `get_powerwall_status`: Connects locally to the Tesla Powerwall gateway to return battery percentage, grid status, solar power generation, home load and battery power.
-2. `get_solar_forecast`: Queries the Open-Meteo API for the tilted-panel irradiance of each of the three roof arrays (one request per array), converts it to watts using each array's size, and returns the combined hourly total for the next 48 hours. Night hours are left out.
+1. `get_powerwall_status`: Reads the local Tesla Powerwall gateway: battery charge (Tesla app scale), grid status (`UP`, `DOWN` or `SYNCING`), grid power, solar generation, home load and battery power, in watts.
+2. `get_solar_forecast`: Queries Open-Meteo for the tilted-panel irradiance of each roof array (one request per array), converts it to watts using each array's size and the derate in `site.toml`, and returns the next 48 hours from the current hour, per array and in total, plus expected kWh per day. Night hours are left out.
 3. `get_active_weather_alerts`: Returns active National Weather Service alerts, watches and warnings for the home location (US only).
 
-Neither weather API needs a key.
+Failures are reported as MCP tool errors, so clients can tell an error from a reading. Neither weather API needs a key.
+
+## Site layout (site.toml)
+`site.toml` describes the arrays, panels and which strings feed which Powerwall+ input, taken from the Tesla permit plans. It holds layout only, no credentials or location, and is checked on load: the panels wired to inputs must add up to each array's panel count. Point `SITE_CONFIG` at another file to override it.
 
 ## Configuration (.env)
-Ensure your `.env` file (in `src/server/`) contains:
+Copy `.env.example` to `src/server/.env` for local runs, and fill it in. The file is gitignored; never commit it.
 - `PW_HOST`, `PW_PASSWORD`, `PW_EMAIL`: Powerwall gateway credentials. `PW_EMAIL` is also sent as the contact in the NWS request header.
-- `SOLAR_LAT`, `SOLAR_LON`: Home location, used for both the forecast and the alerts.
-- Array specs, one set per array (`_1`, `_2`, `_3`):
-  - `SOLAR_DEC_n`: Panel tilt in degrees.
-  - `SOLAR_AZ_n`: Panel orientation in degrees (0 = South, -90 = East, 90 = West).
-  - `SOLAR_KWP_n`: Array size in kW.
+- `SOLAR_LAT`, `SOLAR_LON`: Home location, used for both the forecast and the alerts. Required; there is no default.
+- `PW_TIMEZONE` (optional): defaults to `America/Chicago`.
+- `PW_CACHE_DIR` (optional): where pypowerwall keeps its login cache, default the current directory. The Docker image uses `/data`.
 
-The timezone is fixed to `America/Chicago` in `server.py`.
-
-Put comments on their own lines, not after a value. Docker's `--env-file` does not strip inline comments, so `SOLAR_KWP_1=5.2  # my array` makes the forecast tool fail.
+Put comments on their own lines, not after a value. Docker's `--env-file` does not strip inline comments.
 
 ## Running Locally
 ```bash
-cd src/server
-uv run server.py
+cd server
+uv run server
 ```
-The client then connects with `MCP_SERVER_URL=http://localhost:8000/sse`.
+The client then connects with `MCP_SERVER_URL=http://localhost:8000/mcp`.
 
-Two standalone scripts in `src/server/` check each data source without starting the server:
+Two scripts check each data source without starting the server:
 ```bash
-uv run test_pw.py         # Powerwall connection and live readings
-uv run test_forecast.py   # Per-array and total solar forecast
+uv run scripts/check_powerwall.py   # Powerwall connection and live readings
+uv run scripts/check_forecast.py    # Per-array and total solar forecast
 ```
+
+## Tests
+```bash
+uv run pytest
+uv run ruff check .
+```
+CI runs both for the server and the client on every pull request, on GitHub-hosted runners, plus a gitleaks secret scan.
 
 ## Deployment
-Pushing changes under `server/` to `main` triggers `.github/workflows/deploy.yml`, which builds the Docker image on the self-hosted runner and restarts the `mcp-server` container on port 8000. The container reads its configuration from `/home/nicolaskeller/mcp-server.env` on that host, not from the repo, so that file needs all the variables above.
+Pushing changes under `server/` to `main` triggers `.github/workflows/deploy.yml`, which builds the Docker image on the self-hosted runner and restarts the `mcp-server` container on port 8000 with a `powerwall-data` volume on `/data`. The container reads its configuration from the env file on that host, not from the repo, so that file needs the variables above.
