@@ -1,11 +1,18 @@
 # Environment variables and secrets
 .env
 **/.env
+.env.*
+!.env.example
 .powerwall
+# pypowerwall login, cloud and gateway caches
+.pypowerwall*
+*.pem
+data/
 
 # Python virtual environments and caches
 .venv/
 **/__pycache__/
 *.pyc
+
 #Mac internals
 .DS_Store
