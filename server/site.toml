@@ -1,0 +1,68 @@
+# Physical layout of the solar and battery system, from the Tesla permit plan set
+# (job JB-7821471, sheets 1, 2 and 8). Layout only: credentials and the home
+# location stay in the .env file.
+
+# Fraction of nameplate power that reaches the AC side (temperature, wiring,
+# inverter losses). Starting value; to be tuned from measured production.
+derate = 0.85
+
+[panel]
+model = "Tesla T400H"
+watts = 400
+
+# Azimuth is a compass bearing: 0 = North, 90 = East, 180 = South, 270 = West.
+[[arrays]]
+name = "MP1"
+panels = 13
+tilt = 44
+azimuth = 210
+
+[[arrays]]
+name = "MP2"
+panels = 3
+tilt = 30
+azimuth = 210
+
+[[arrays]]
+name = "MP3"
+panels = 16
+tilt = 30
+azimuth = 300
+
+# One entry per inverter input. `input` is the letter the gateway reports for it,
+# left empty until it has been matched against live readings.
+# `strings` > 1 means that many strings are paralleled on the one input.
+[[inputs]]
+powerwall = 1
+input = ""
+array = "MP2"
+panels_per_string = 3
+strings = 1
+
+[[inputs]]
+powerwall = 1
+input = ""
+array = "MP1"
+panels_per_string = 6
+strings = 1
+
+[[inputs]]
+powerwall = 1
+input = ""
+array = "MP1"
+panels_per_string = 7
+strings = 1
+
+[[inputs]]
+powerwall = 2
+input = ""
+array = "MP3"
+panels_per_string = 4
+strings = 1
+
+[[inputs]]
+powerwall = 2
+input = ""
+array = "MP3"
+panels_per_string = 6
+strings = 2

@@ -5,8 +5,10 @@ Trying to figure out how to configure my batteries based on the weather forecast
 An AI workflow lab integrating Model Context Protocol (MCP), local Tesla Powerwall telemetry, multi-array solar forecasting (Open-Meteo), National Weather Service alerts, and an LLM agent running on either Gemini or Claude.
 
 ## Project Structure
-- `server/`: Python FastMCP server exposing the Powerwall status, the 3-array solar forecast and active weather alerts as MCP tools over SSE. See [server/README.md](server/README.md).
+- `server/`: Python FastMCP server exposing the Powerwall status, the 3-array solar forecast and active weather alerts as MCP tools over streamable HTTP. See [server/README.md](server/README.md).
 - `client/`: Agent client that discovers those tools, calls them, and recommends a backup reserve for the night. The LLM provider (Gemini or Claude) is selected in its `.env` file. See [client/README.md](client/README.md).
+- `server/site.toml`: The physical layout (arrays, panels, strings and Powerwall+ inputs) from the Tesla permit plans.
+- `.github/workflows/ci.yml`: Lint, unit tests and a secret scan on every pull request, on GitHub-hosted runners.
 - `.github/workflows/deploy.yml`: Rebuilds and restarts the server's Docker container on a self-hosted runner whenever `server/` changes on `main`.
 
 ## Quick Start

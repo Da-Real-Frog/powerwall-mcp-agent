@@ -1,6 +1,8 @@
 # Environment variables and secrets
 .env
 **/.env
+.env.*
+!.env.example
 
 # Python virtual environments and caches
 .venv/
