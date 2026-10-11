@@ -6,6 +6,18 @@ An MCP (Model Context Protocol) server built with Python and FastMCP that expose
 1. `get_powerwall_status`: Reads the local Tesla Powerwall gateway: battery charge (Tesla app scale), grid status (`UP`, `DOWN` or `SYNCING`), grid power, solar generation, home load and battery power, in watts.
 2. `get_solar_forecast`: Queries Open-Meteo for the tilted-panel irradiance of each roof array (one request per array), converts it to watts using each array's size and the derate in `site.toml`, and returns the next 48 hours from the current hour, per array and in total, plus expected kWh per day. Night hours are left out.
 3. `get_active_weather_alerts`: Returns active National Weather Service alerts, watches and warnings for the home location (US only).
+4. `get_site_layout`: The arrays and inverter inputs from `site.toml`.
+5. `get_string_status`: The latest volts, amps and watts of each solar input, from the collector, with its array and watts per panel once its letter is mapped in `site.toml`.
+6. `get_history`: Averaged battery, solar, home, grid and per-input readings over the last N hours.
+7. `get_energy_summary`: kWh per day for solar, home, grid import and export, battery charge and discharge, and grid-down minutes.
+
+## Collector
+While the server runs, a background thread reads the gateway every 30 seconds and saves the readings to SQLite (`powerwall.db` in `PW_CACHE_DIR`, so `/data` in Docker). Raw readings are kept for 90 days; five-minute averages are kept forever and back the history and energy tools. A failed read is logged and retried on the next poll.
+
+Without `PW_GW_PWD`, the gateway's local API on current firmware reports only the four inputs of the main Powerwall+ (A to D). With it, pypowerwall reads every input on both inverters over TEDAPI (A to D, then A1 to D1, and so on). TEDAPI is only served at the gateway's internal address, so the Docker host needs a route to it through the gateway's LAN address:
+```bash
+sudo ip route add 192.168.91.1 via <PW_HOST>
+```
 
 Failures are reported as MCP tool errors, so clients can tell an error from a reading. Neither weather API needs a key.
 
@@ -17,7 +29,9 @@ Copy `.env.example` to `src/server/.env` for local runs, and fill it in. The fil
 - `PW_HOST`, `PW_PASSWORD`, `PW_EMAIL`: Powerwall gateway credentials. `PW_EMAIL` is also sent as the contact in the NWS request header.
 - `SOLAR_LAT`, `SOLAR_LON`: Home location, used for both the forecast and the alerts. Required; there is no default.
 - `PW_TIMEZONE` (optional): defaults to `America/Chicago`.
-- `PW_CACHE_DIR` (optional): where pypowerwall keeps its login cache, default the current directory. The Docker image uses `/data`.
+- `PW_CACHE_DIR` (optional): where pypowerwall keeps its login cache and the collector its database, default the current directory. The Docker image uses `/data`.
+- `PW_GW_PWD` (optional): the gateway's Wi-Fi password from its label, for per-string data on both inverters (see Collector).
+- `PW_POLL_SECONDS` (optional): collector interval, default 30. `PW_COLLECT=0` turns the collector off; `PW_DB_PATH` overrides the database file.
 
 Put comments on their own lines, not after a value. Docker's `--env-file` does not strip inline comments.
 
