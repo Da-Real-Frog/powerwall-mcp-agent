@@ -1,6 +1,6 @@
 # Powerwall & Solar MCP Server
 
-An MCP (Model Context Protocol) server built with Python and FastMCP that exposes local Powerwall telemetry, a solar forecast and weather alerts as read-only tools. It serves streamable HTTP on port 8000 at `/mcp`.
+An MCP (Model Context Protocol) server built with Python and FastMCP that exposes local Powerwall telemetry, a solar forecast and weather alerts as read-only tools. It serves streamable HTTP on port 8000 at `/mcp`, and SSE at `/sse` for clients such as MCP Inspector that were set up for the original SSE endpoint.
 
 ## Tools Provided
 1. `get_powerwall_status`: Reads the local Tesla Powerwall gateway: battery charge (Tesla app scale), grid status (`UP`, `DOWN` or `SYNCING`), grid power, solar generation, home load and battery power, in watts.

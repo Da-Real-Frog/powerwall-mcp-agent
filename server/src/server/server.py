@@ -1,9 +1,12 @@
 """MCP server exposing Powerwall telemetry, the solar forecast and weather alerts as read-only tools."""
 import os
+from contextlib import asynccontextmanager
 
+import uvicorn
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
+from starlette.applications import Starlette
 
 from . import forecast, powerwall, weather
 from .config import ConfigError, load_site, location, timezone
@@ -58,11 +61,30 @@ def get_active_weather_alerts() -> dict:
     return {"alerts": alerts}
 
 
+def create_app() -> Starlette:
+    """Serves both transports on one port.
+
+    /mcp is Streamable HTTP with plain JSON replies (the Gemini client uses it). /sse is the SSE
+    endpoint the server had originally, kept because MCP Inspector setups that used it still connect to it.
+    """
+    http_app = mcp.http_app(path="/mcp", json_response=True, stateless_http=True)
+    sse_app = mcp.http_app(transport="sse")
+
+    @asynccontextmanager
+    async def lifespan(app):
+        async with http_app.router.lifespan_context(app), sse_app.router.lifespan_context(app):
+            yield
+
+    return Starlette(
+        routes=[*http_app.routes, *sse_app.routes],
+        middleware=http_app.user_middleware,
+        lifespan=lifespan,
+    )
+
+
 def main() -> None:
-    # Streamable HTTP on all interfaces; clients connect to http://<host>:8000/mcp.
-    # Every reply is a plain JSON body with no per-session stream: the tools are simple
-    # request/response calls, and proxies (such as MCP Inspector's) can drop streamed replies.
-    mcp.run(transport="http", host="0.0.0.0", port=8000, json_response=True, stateless_http=True)
+    # Clients connect to http://<host>:8000/mcp (Streamable HTTP) or http://<host>:8000/sse (SSE).
+    uvicorn.run(create_app(), host="0.0.0.0", port=8000)
 
 
 if __name__ == "__main__":
