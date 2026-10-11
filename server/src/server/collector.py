@@ -4,14 +4,15 @@ import os
 import threading
 import time
 
-from . import health, powerwall
-from .config import load_site, timezone
+from . import forecast, health, powerwall, reserve, weather
+from .config import load_site, location, timezone
 from .storage import BUCKET, Store
 
 log = logging.getLogger(__name__)
 
 ROLLUP_EVERY = 300  # seconds between recomputing the five-minute averages
 CHECK_EVERY = 300  # seconds between health checks
+RESERVE_EVERY = 900  # seconds between reserve decisions
 
 
 def db_path() -> str:
@@ -19,10 +20,13 @@ def db_path() -> str:
 
 
 class Collector:
-    def __init__(self, store: Store, interval: float, monitor: health.Monitor | None = None):
+    def __init__(self, store: Store, interval: float, monitor: health.Monitor | None = None,
+                 controller: reserve.Controller | None = None):
         self.store = store
         self.interval = interval
         self.monitor = monitor
+        self.controller = controller
+        self._last_reserve = 0.0
         self.started = int(time.time())
         self.last_success: int | None = None
         self.last_error: str | None = None
@@ -48,6 +52,13 @@ class Collector:
             self._last_check = now
             self.monitor.run(self.last_success, self.started, now)
 
+    def adjust_reserve(self) -> None:
+        """Runs the reserve controller every RESERVE_EVERY seconds, once readings are coming in."""
+        now = int(time.time())
+        if self.controller and self.last_success and now - self._last_reserve >= RESERVE_EVERY:
+            self._last_reserve = now
+            self.controller.step(gather_reserve_inputs(self.store, self.controller.settings, now), now)
+
     def run(self) -> None:
         while True:
             try:
@@ -59,6 +70,10 @@ class Collector:
                 self.check()
             except Exception:
                 log.exception("Health check failed")
+            try:
+                self.adjust_reserve()
+            except Exception:
+                log.exception("Reserve controller failed")
             time.sleep(self.interval)
 
     def info(self) -> dict:
@@ -84,9 +99,13 @@ def get_store() -> Store:
 def start() -> Collector:
     """Starts polling in a daemon thread. Called once from main()."""
     global _collector
-    monitor = health.Monitor(load_site(), get_store(), health.notifier_from_env(), timezone(),
-                             os.getenv("HEARTBEAT_URL", "").strip() or None)
-    _collector = Collector(get_store(), float(os.getenv("PW_POLL_SECONDS", "30")), monitor)
+    site = load_site()
+    notifier = health.notifier_from_env()
+    monitor = health.Monitor(site, get_store(), notifier, timezone(), os.getenv("HEARTBEAT_URL", "").strip() or None)
+    controller = reserve.Controller(
+        get_store(), site.reserve, live=reserve_mode() == "live", tz=timezone(), notifier=notifier,
+        writer=reserve.make_writer(powerwall.get_connection, powerwall.get_cloud_connection))
+    _collector = Collector(get_store(), float(os.getenv("PW_POLL_SECONDS", "30")), monitor, controller)
     threading.Thread(target=_collector.run, name="collector", daemon=True).start()
     return _collector
 
@@ -97,3 +116,22 @@ def info() -> dict | None:
 
 def get_collector() -> Collector | None:
     return _collector
+
+
+def reserve_mode() -> str:
+    """"dry-run" (the default) records and announces decisions; "live" also writes them to the Powerwall."""
+    return "live" if os.getenv("RESERVE_MODE", "").strip().lower() == "live" else "dry-run"
+
+
+def gather_reserve_inputs(store: Store, settings, now: int) -> reserve.Inputs:
+    tz = timezone()
+
+    def alerts():
+        lat, lon = location()
+        return weather.get_alerts(lat, lon, os.getenv("PW_EMAIL", "home-energy-agent@local"))
+
+    def solar():
+        lat, lon = location()
+        return forecast.get_forecast(load_site(), lat, lon, tz)
+
+    return reserve.gather(powerwall.get_connection, store, settings, alerts, solar, now, tz)

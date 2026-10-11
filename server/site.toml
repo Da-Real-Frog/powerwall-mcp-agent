@@ -83,3 +83,19 @@ input = "B"
 array = "MP3"
 panels_per_string = 6
 strings = 1
+
+# Backup reserve controller. Reserve percentages are on the Tesla app's scale. Starting values
+# to tune, not recommendations from data. The rules are listed in the README.
+[reserve]
+warning = 100            # rule 2: severe NWS warning, held warning_hold_hours after it ends
+watch = 80               # rule 3: severe NWS watch
+low_solar = 60           # rule 4: tomorrow's solar below daytime use
+partial = 40             # rule 5: solar covers daytime use but not a full recharge
+default = 20             # rule 6: otherwise
+warning_hold_hours = 6
+battery_kwh = 27         # two Powerwall+ units
+daytime_use_kwh = 15     # estimates, replaced by measured medians after 14 days of history
+overnight_use_kwh = 10
+min_change = 5           # percentage points
+min_interval_minutes = 60
+manual_pause_hours = 24  # after a change made in the Tesla app

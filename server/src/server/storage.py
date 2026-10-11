@@ -4,6 +4,7 @@ Raw readings (one row per poll) are kept for RAW_DAYS. Five-minute averages are 
 back the history and energy tools, so the database stays small: about 100 MB a year of raw rows,
 pruned to a few MB of averages once they age out.
 """
+import json
 import sqlite3
 import threading
 import time
@@ -63,6 +64,20 @@ CREATE TABLE IF NOT EXISTS alerts (
     resolved_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS alerts_open ON alerts (resolved_at, key);
+CREATE TABLE IF NOT EXISTS reserve_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    state TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS reserve_decisions (
+    ts INTEGER NOT NULL,
+    rule INTEGER NOT NULL,
+    target REAL,
+    current REAL,
+    action TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    details TEXT
+);
+CREATE INDEX IF NOT EXISTS reserve_decisions_ts ON reserve_decisions (ts);
 """
 
 # Signed powers are split before averaging, so a bucket that both imported and exported keeps both.
@@ -201,3 +216,36 @@ class Store:
     def resolve_alert(self, alert_id: int, now: int) -> None:
         with self._lock, self._db:
             self._db.execute("UPDATE alerts SET resolved_at = ? WHERE id = ?", (now, alert_id))
+
+    def reserve_state(self) -> dict:
+        with self._lock:
+            row = self._db.execute("SELECT state FROM reserve_state WHERE id = 1").fetchone()
+        return json.loads(row[0]) if row else {}
+
+    def save_reserve_state(self, state: dict) -> None:
+        with self._lock, self._db:
+            self._db.execute("INSERT OR REPLACE INTO reserve_state VALUES (1, ?)", (json.dumps(state),))
+
+    def log_reserve_decision(self, ts: int, rule: int, target: float | None, current: float | None,
+                             action: str, mode: str, details: str) -> None:
+        with self._lock, self._db:
+            self._db.execute("INSERT INTO reserve_decisions VALUES (?, ?, ?, ?, ?, ?, ?)",
+                             (ts, rule, target, current, action, mode, details))
+
+    def last_reserve_decision(self) -> dict | None:
+        with self._lock:
+            row = self._db.execute("SELECT * FROM reserve_decisions ORDER BY ts DESC, rowid DESC LIMIT 1").fetchone()
+        return dict(row) if row else None
+
+    def reserve_decisions(self, since: int) -> list[dict]:
+        """Decisions since `since`, keeping only those that differ from the one before (rule, target or action)."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT * FROM reserve_decisions WHERE ts >= ? ORDER BY ts, rowid", (since,)).fetchall()
+        changes, last = [], None
+        for r in map(dict, rows):
+            key = (r["rule"], r["target"], r["action"])
+            if key != last:
+                changes.append(r)
+                last = key
+        return changes

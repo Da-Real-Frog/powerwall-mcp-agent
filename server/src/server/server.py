@@ -1,7 +1,9 @@
 """MCP server exposing Powerwall telemetry, the solar forecast and weather alerts as read-only tools."""
+import json
 import os
 import time
 from contextlib import asynccontextmanager
+from dataclasses import asdict
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -11,7 +13,7 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from starlette.applications import Starlette
 
-from . import collector, forecast, health, history, powerwall, weather
+from . import collector, forecast, health, history, powerwall, reserve, weather
 from .config import ConfigError, load_site, location, timezone
 
 # Load environment variables from .env (Docker passes them with --env-file instead)
@@ -156,6 +158,47 @@ def get_alerts(days: int = 7) -> dict:
     if not 1 <= days <= 366:
         raise ToolError("days must be between 1 and 366")
     return {"alerts": _alerts(collector.get_store().alerts_since(int(time.time()) - days * 86400))}
+
+
+@mcp.tool()
+def explain_reserve_decision() -> dict:
+    """
+    Explains the backup reserve the controller would choose right now and why: the rule that matched
+    (1 grid down: leave it; 2 severe NWS warning: 100%; 3 severe watch: 80%; 4 tomorrow's solar below
+    daytime use: 60%; 5 solar covers daytime use but not a full recharge: 40%; 6 otherwise: 20%), the inputs
+    behind it, and whether a safeguard (minimum step, one change per hour, pause after a manual change)
+    holds it back. Also says whether the controller is in dry-run or live mode. Changes nothing.
+    """
+    try:
+        site = load_site()
+        now = int(time.time())
+        inputs = collector.gather_reserve_inputs(collector.get_store(), site.reserve, now)
+    except (ConfigError, powerwall.PowerwallError) as e:
+        raise ToolError(str(e)) from e
+    running = collector.get_collector()
+    controller = running.controller if running and running.controller else reserve.Controller(
+        collector.get_store(), site.reserve, live=False, tz=timezone())
+    return {"mode": collector.reserve_mode(), "inputs": asdict(inputs), **controller.preview(inputs, now)}
+
+
+@mcp.tool()
+def get_reserve_log(days: int = 7) -> dict:
+    """
+    The reserve controller's decisions over the last `days` days (default 7), one entry each time the rule,
+    target or action changed: when, which rule, the target and the reserve at the time, and what it did
+    (set, would_set in dry-run, waiting, paused, none or failed), with the reason.
+    """
+    if not 1 <= days <= 90:
+        raise ToolError("days must be between 1 and 90")
+    zone = ZoneInfo(timezone())
+    entries = []
+    for d in collector.get_store().reserve_decisions(int(time.time()) - days * 86400):
+        details = json.loads(d["details"] or "{}")
+        entries.append({"time": datetime.fromtimestamp(d["ts"], zone).isoformat(timespec="minutes"),
+                        "rule": d["rule"], "target": d["target"], "reserve_then": d["current"],
+                        "action": d["action"], "mode": d["mode"], "reason": details.get("reason"),
+                        "note": details.get("note")})
+    return {"mode": collector.reserve_mode(), "decisions": entries}
 
 
 def _alerts(rows: list[dict]) -> list[dict]:

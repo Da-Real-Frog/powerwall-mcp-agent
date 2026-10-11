@@ -12,6 +12,24 @@ An MCP (Model Context Protocol) server built with Python and FastMCP that expose
 7. `get_energy_summary`: kWh per day for solar, home, grid import and export, battery charge and discharge, and grid-down minutes.
 8. `get_health_report`: Runs the health checks now and returns what they find, plus the open alerts.
 9. `get_alerts`: Open alerts and those resolved in the last N days, with when each opened and closed.
+10. `explain_reserve_decision`: The backup reserve the controller would choose now, the rule and inputs behind it, and any safeguard holding it back. Changes nothing.
+11. `get_reserve_log`: The controller's decisions over the last N days.
+
+## Reserve controller
+Every 15 minutes the collector picks a backup reserve with ordered rules; the first match wins. The percentages are in `[reserve]` in `site.toml` and are starting values to tune.
+
+| Rule | Condition | Reserve |
+| --- | --- | --- |
+| 1 | Grid is down | Unchanged |
+| 2 | Severe NWS warning (tornado, severe thunderstorm, hurricane, tropical storm, winter storm, ice storm, blizzard, extreme cold or heat, high wind), held 6 hours after it ends | 100% |
+| 3 | Severe NWS watch for the same events | 80% |
+| 4 | Tomorrow's solar forecast is below daytime home use | 60% |
+| 5 | Tomorrow's solar covers daytime use but not a full recharge (27 kWh) | 40% |
+| 6 | Otherwise | 20% |
+
+If the NWS alerts or the forecast can't be fetched, nothing changes. Daytime use (07:00 to 19:00) is the median of the last 14 days once the collector has them, and the estimate in `site.toml` until then. Safeguards: changes of under 5 points are skipped, at most one change per hour, and a change made in the Tesla app pauses the controller for 24 hours.
+
+`RESERVE_MODE` is `dry-run` by default: decisions are recorded and announced on ntfy ("Would set reserve to 100%") but nothing is written. With `RESERVE_MODE=live` it writes through the local gateway and falls back to Tesla's cloud if the gateway refuses. The cloud fallback needs a one-time Tesla sign-in saved in `PW_CACHE_DIR`; without it, a refused local write is recorded as failed.
 
 ## Health checks and alerts
 Every five minutes the collector runs fixed rules over the readings, no LLM involved:
@@ -44,6 +62,7 @@ Copy `.env.example` to `src/server/.env` for local runs, and fill it in. The fil
 - `PW_GW_PWD` (optional): the gateway's Wi-Fi password from its label, for per-string data on both inverters (see Collector).
 - `NTFY_URL` (optional): the full ntfy topic URL alerts are posted to, such as `https://ntfy.sh/<your-topic>`. Pick a hard-to-guess topic name: anyone who knows it can read the alerts. `NTFY_TOKEN` is the access token if the topic is protected. Without `NTFY_URL`, alerts are only recorded.
 - `HEARTBEAT_URL` (optional): a dead-man check URL, such as a healthchecks.io ping URL, pinged after every health check. If the server or percula stops, the pings stop and that service alerts you.
+- `RESERVE_MODE` (optional): `dry-run` (default) or `live`. See Reserve controller.
 - `PW_POLL_SECONDS` (optional): collector interval, default 30. `PW_COLLECT=0` turns the collector off; `PW_DB_PATH` overrides the database file.
 
 Put comments on their own lines, not after a value. Docker's `--env-file` does not strip inline comments.
