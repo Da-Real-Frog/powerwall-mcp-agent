@@ -51,6 +51,18 @@ CREATE TABLE IF NOT EXISTS strings_5min (
     watts REAL,
     PRIMARY KEY (bucket, input)
 );
+CREATE TABLE IF NOT EXISTS alerts (
+    id INTEGER PRIMARY KEY,
+    key TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    subject TEXT,
+    message TEXT NOT NULL,
+    opened_at INTEGER NOT NULL,
+    last_seen INTEGER NOT NULL,
+    misses INTEGER NOT NULL DEFAULT 0,
+    resolved_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS alerts_open ON alerts (resolved_at, key);
 """
 
 # Signed powers are split before averaging, so a bucket that both imported and exported keeps both.
@@ -141,3 +153,51 @@ class Store:
                 "SELECT * FROM readings_5min WHERE bucket >= ? AND bucket < ? ORDER BY bucket", (start, end)
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def string_buckets(self, start: int, end: int) -> list[dict]:
+        """Five-minute string averages with bucket start in [start, end)."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT * FROM strings_5min WHERE bucket >= ? AND bucket < ? ORDER BY bucket, input", (start, end)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def latest_reading(self) -> dict | None:
+        with self._lock:
+            row = self._db.execute("SELECT * FROM readings ORDER BY ts DESC LIMIT 1").fetchone()
+        return dict(row) if row else None
+
+    def open_alerts(self) -> list[dict]:
+        with self._lock:
+            rows = self._db.execute("SELECT * FROM alerts WHERE resolved_at IS NULL ORDER BY opened_at").fetchall()
+        return [dict(r) for r in rows]
+
+    def alerts_since(self, since: int) -> list[dict]:
+        """Open alerts plus those resolved after `since`."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT * FROM alerts WHERE resolved_at IS NULL OR resolved_at >= ? ORDER BY opened_at", (since,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def open_alert(self, key: str, kind: str, subject: str | None, message: str, now: int) -> None:
+        with self._lock, self._db:
+            self._db.execute(
+                "INSERT INTO alerts (key, kind, subject, message, opened_at, last_seen) VALUES (?, ?, ?, ?, ?, ?)",
+                (key, kind, subject, message, now, now),
+            )
+
+    def touch_alert(self, alert_id: int, message: str, now: int) -> None:
+        with self._lock, self._db:
+            self._db.execute(
+                "UPDATE alerts SET last_seen = ?, misses = 0, message = ? WHERE id = ?", (now, message, alert_id)
+            )
+
+    def miss_alert(self, alert_id: int) -> int:
+        with self._lock, self._db:
+            self._db.execute("UPDATE alerts SET misses = misses + 1 WHERE id = ?", (alert_id,))
+            return self._db.execute("SELECT misses FROM alerts WHERE id = ?", (alert_id,)).fetchone()[0]
+
+    def resolve_alert(self, alert_id: int, now: int) -> None:
+        with self._lock, self._db:
+            self._db.execute("UPDATE alerts SET resolved_at = ? WHERE id = ?", (now, alert_id))

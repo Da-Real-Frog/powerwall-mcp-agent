@@ -2,6 +2,8 @@
 import os
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import uvicorn
 from dotenv import load_dotenv
@@ -9,7 +11,7 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from starlette.applications import Starlette
 
-from . import collector, forecast, history, powerwall, weather
+from . import collector, forecast, health, history, powerwall, weather
 from .config import ConfigError, load_site, location, timezone
 
 # Load environment variables from .env (Docker passes them with --env-file instead)
@@ -116,6 +118,54 @@ def get_energy_summary(days: int = 7) -> dict:
     if not 1 <= days <= 366:
         raise ToolError("days must be between 1 and 366")
     return history.energy_summary(collector.get_store(), days, int(time.time()), timezone())
+
+
+@mcp.tool()
+def get_health_report() -> dict:
+    """
+    Runs the health checks now over the recorded readings and returns what they find: a string producing
+    nothing or under half of its neighbours (per panel, averaged over 15 minutes), an input missing from
+    the gateway's readings, the grid being down, or no recent reading from the gateway. Also lists the
+    alerts currently open. Read-only: it does not open, close or send alerts.
+    """
+    try:
+        site = load_site()
+    except ConfigError as e:
+        raise ToolError(str(e)) from e
+    running = collector.get_collector()
+    now = int(time.time())
+    last_success = running.last_success if running else None
+    started = running.started if running else now
+    findings = health.evaluate(site, collector.get_store(), last_success, started, now)
+    return {
+        "healthy": not findings,
+        "findings": [{"kind": f.kind, "input": f.subject, "severity": f.severity, "message": f.message}
+                     for f in findings],
+        "open_alerts": _alerts(collector.get_store().open_alerts()),
+        "collector": collector.info(),
+    }
+
+
+@mcp.tool()
+def get_alerts(days: int = 7) -> dict:
+    """
+    Alerts raised by the health checks: every open alert plus those resolved in the last `days` days
+    (default 7), with when each opened, was last seen and resolved. Use it to build a history of faults,
+    for example to report a failing string to Tesla.
+    """
+    if not 1 <= days <= 366:
+        raise ToolError("days must be between 1 and 366")
+    return {"alerts": _alerts(collector.get_store().alerts_since(int(time.time()) - days * 86400))}
+
+
+def _alerts(rows: list[dict]) -> list[dict]:
+    zone = ZoneInfo(timezone())
+
+    def stamp(t):
+        return None if t is None else datetime.fromtimestamp(t, zone).isoformat(timespec="minutes")
+
+    return [{"kind": a["kind"], "input": a["subject"], "message": a["message"], "opened": stamp(a["opened_at"]),
+             "last_seen": stamp(a["last_seen"]), "resolved": stamp(a["resolved_at"])} for a in rows]
 
 
 def create_app() -> Starlette:

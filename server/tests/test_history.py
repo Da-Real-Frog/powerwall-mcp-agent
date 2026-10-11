@@ -31,15 +31,12 @@ def filled_store(tmp_path, start: int, hours: float) -> Store:
 
 def test_latest_strings_are_mapped_to_the_site_layout(tmp_path):
     store = filled_store(tmp_path, noon(), 0.1)
-    site = load_site()
-    site = site.__class__(site.derate, site.panel_watts, site.arrays,
-                          (site.inputs[1].__class__(1, "A", "MP1", 6, 1), *site.inputs[1:]))
-    result = history.string_status(site, store.latest_strings(), noon() + 400, TZ)
+    result = history.string_status(load_site(), store.latest_strings(), noon() + 400, TZ)
 
     a, c = result["inputs"]
-    assert a["array"] == "MP1" and a["watts_per_panel"] == 31.7
-    assert "array" not in c
-    assert result["unmapped_inputs"] == ["C"]
+    assert a["array"] == "MP3" and a["watts_per_panel"] == 31.7
+    assert c["unused"] and "array" not in c
+    assert result["unmapped_inputs"] == []
     assert result["age_seconds"] == 400 - 330
 
 

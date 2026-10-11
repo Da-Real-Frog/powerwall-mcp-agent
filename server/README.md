@@ -10,6 +10,17 @@ An MCP (Model Context Protocol) server built with Python and FastMCP that expose
 5. `get_string_status`: The latest volts, amps and watts of each solar input, from the collector, with its array and watts per panel once its letter is mapped in `site.toml`.
 6. `get_history`: Averaged battery, solar, home, grid and per-input readings over the last N hours.
 7. `get_energy_summary`: kWh per day for solar, home, grid import and export, battery charge and discharge, and grid-down minutes.
+8. `get_health_report`: Runs the health checks now and returns what they find, plus the open alerts.
+9. `get_alerts`: Open alerts and those resolved in the last N days, with when each opened and closed.
+
+## Health checks and alerts
+Every five minutes the collector runs fixed rules over the readings, no LLM involved:
+- **String dead / low:** each mapped input is compared, in watts per panel averaged over 15 minutes, with the other inputs on the same array. Under 2 W per panel is dead; under half of the neighbours' median is low. No verdict while the neighbours make under 20 W per panel (night, heavy cloud).
+- **Input missing:** a mapped input letter is absent from the gateway's latest readings, which usually means its inverter is offline.
+- **Grid down:** the gateway reports the grid as anything but `UP`.
+- **Collector stale:** no successful reading for 5 minutes.
+
+A new finding opens an alert and sends an ntfy notification. The alert closes, with a "Resolved" notification, after three checks in a row without it. Alerts are kept in the database, so `get_alerts` gives the history. Inputs listed in `unused_inputs` in `site.toml` are never flagged.
 
 ## Collector
 While the server runs, a background thread reads the gateway every 30 seconds and saves the readings to SQLite (`powerwall.db` in `PW_CACHE_DIR`, so `/data` in Docker). Raw readings are kept for 90 days; five-minute averages are kept forever and back the history and energy tools. A failed read is logged and retried on the next poll.
@@ -31,6 +42,8 @@ Copy `.env.example` to `src/server/.env` for local runs, and fill it in. The fil
 - `PW_TIMEZONE` (optional): defaults to `America/Chicago`.
 - `PW_CACHE_DIR` (optional): where pypowerwall keeps its login cache and the collector its database, default the current directory. The Docker image uses `/data`.
 - `PW_GW_PWD` (optional): the gateway's Wi-Fi password from its label, for per-string data on both inverters (see Collector).
+- `NTFY_URL` (optional): the full ntfy topic URL alerts are posted to, such as `https://ntfy.sh/<your-topic>`. Pick a hard-to-guess topic name: anyone who knows it can read the alerts. `NTFY_TOKEN` is the access token if the topic is protected. Without `NTFY_URL`, alerts are only recorded.
+- `HEARTBEAT_URL` (optional): a dead-man check URL, such as a healthchecks.io ping URL, pinged after every health check. If the server or percula stops, the pings stop and that service alerts you.
 - `PW_POLL_SECONDS` (optional): collector interval, default 30. `PW_COLLECT=0` turns the collector off; `PW_DB_PATH` overrides the database file.
 
 Put comments on their own lines, not after a value. Docker's `--env-file` does not strip inline comments.

@@ -40,6 +40,7 @@ class Site:
     panel_watts: float
     arrays: tuple[Array, ...]
     inputs: tuple[Input, ...]
+    unused_inputs: frozenset[str] = frozenset()  # gateway letters with nothing wired to them
 
 
 def load_site(path: str | Path | None = None) -> Site:
@@ -76,6 +77,7 @@ def load_site(path: str | Path | None = None) -> Site:
             )
             for i in raw.get("inputs", [])
         )
+        unused = frozenset(str(x) for x in raw.get("unused_inputs", []))
     except (KeyError, TypeError, ValueError) as e:
         raise ConfigError(f"Site file {path} is missing or has an invalid field: {e}") from e
 
@@ -83,6 +85,12 @@ def load_site(path: str | Path | None = None) -> Site:
         raise ConfigError(f"Site file {path} defines no arrays")
     if not 0 < derate <= 1:
         raise ConfigError(f"derate must be between 0 and 1, got {derate}")
+
+    letters = [i.input for i in inputs if i.input]
+    if len(letters) != len(set(letters)):
+        raise ConfigError("Each input letter can be mapped only once")
+    if unused & set(letters):
+        raise ConfigError(f"Inputs listed as unused are also mapped: {sorted(unused & set(letters))}")
 
     names = {a.name for a in arrays}
     for i in inputs:
@@ -94,7 +102,7 @@ def load_site(path: str | Path | None = None) -> Site:
             if wired != a.panels:
                 raise ConfigError(f"Array {a.name} has {a.panels} panels but its inputs wire {wired}")
 
-    return Site(derate=derate, panel_watts=panel_watts, arrays=arrays, inputs=inputs)
+    return Site(derate=derate, panel_watts=panel_watts, arrays=arrays, inputs=inputs, unused_inputs=unused)
 
 
 def require_env(name: str) -> str:

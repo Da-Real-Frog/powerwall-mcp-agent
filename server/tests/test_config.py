@@ -7,8 +7,10 @@ def test_repo_site_file_matches_permit_plans():
     site = load_site(DEFAULT_SITE_FILE)
     assert {a.name: a.panels for a in site.arrays} == {"MP1": 13, "MP2": 3, "MP3": 16}
     assert sum(a.kwp for a in site.arrays) == pytest.approx(12.8)
-    assert len(site.inputs) == 5
+    assert len(site.inputs) == 6
     assert sum(i.strings for i in site.inputs) == 6
+    assert {i.input: i.panels_per_string for i in site.inputs if i.input} == {"A": 6, "B": 6, "D": 4}
+    assert site.unused_inputs == {"C"}
 
 
 @pytest.mark.parametrize("compass, open_meteo", [(180, 0), (210, 30), (300, 120), (90, -90), (0, -180)])

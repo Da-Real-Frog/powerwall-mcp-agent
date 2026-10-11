@@ -20,6 +20,7 @@ def site_layout(site: Site) -> dict:
              "panels": i.panels_per_string * i.strings}
             for i in site.inputs
         ],
+        "unused_inputs": sorted(site.unused_inputs),
     }
 
 
@@ -33,7 +34,9 @@ def string_status(site: Site, latest: tuple[int, list[dict]], now: int, tz: str)
         if r["state"] is not None:
             entry["state"] = r["state"]
         wired = by_letter.get(r["input"])
-        if wired:
+        if r["input"] in site.unused_inputs:
+            entry["unused"] = True
+        elif wired:
             panels = wired.panels_per_string * wired.strings
             entry.update(powerwall=wired.powerwall, array=wired.array, panels=panels,
                          watts_per_panel=None if r["watts"] is None else round(r["watts"] / panels, 1))
@@ -42,7 +45,8 @@ def string_status(site: Site, latest: tuple[int, list[dict]], now: int, tz: str)
         "read_at": datetime.fromtimestamp(ts, ZoneInfo(tz)).isoformat(timespec="seconds"),
         "age_seconds": now - ts,
         "inputs": inputs,
-        "unmapped_inputs": sorted(r["input"] for r in rows if r["input"] not in by_letter),
+        "unmapped_inputs": sorted(
+            r["input"] for r in rows if r["input"] not in by_letter and r["input"] not in site.unused_inputs),
     }
 
 

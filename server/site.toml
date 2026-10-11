@@ -6,6 +6,9 @@
 # inverter losses). Starting value; to be tuned from measured production.
 derate = 0.85
 
+# Gateway input letters with nothing wired to them, so a 0 W reading there is not a fault.
+unused_inputs = ["C"]
+
 [panel]
 model = "Tesla T400H"
 watts = 400
@@ -32,6 +35,13 @@ azimuth = 300
 # One entry per inverter input. `input` is the letter the gateway reports for it,
 # left empty until it has been matched against live readings.
 # `strings` > 1 means that many strings are paralleled on the one input.
+#
+# MP3 mapping, inferred from the readings of 2026-10-11: the gateway's local API reports
+# one inverter's inputs A to D. A and B sat at the same voltage (~199 V) and D lower
+# (~154 V), and at 11:22 all three made the same ~31 W per panel, which fits 6 + 6 + 4
+# panels of one array. So the permit's "2 x 6 paralleled" appears to be wired as two
+# separate inputs, and C (-4.3 V, 0 W) has nothing on it (see unused_inputs at the top).
+
 [[inputs]]
 powerwall = 1
 input = ""
@@ -55,14 +65,21 @@ strings = 1
 
 [[inputs]]
 powerwall = 2
-input = ""
+input = "D"
 array = "MP3"
 panels_per_string = 4
 strings = 1
 
 [[inputs]]
 powerwall = 2
-input = ""
+input = "A"
 array = "MP3"
 panels_per_string = 6
-strings = 2
+strings = 1
+
+[[inputs]]
+powerwall = 2
+input = "B"
+array = "MP3"
+panels_per_string = 6
+strings = 1
