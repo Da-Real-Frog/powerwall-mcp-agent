@@ -24,3 +24,10 @@ def test_missing_location_is_reported_as_a_tool_error(monkeypatch):
     result = asyncio.run(run())
     assert result.is_error
     assert "SOLAR_LAT" in result.content[0].text
+
+
+def test_app_serves_both_transports():
+    from server.server import create_app
+
+    paths = {route.path for route in create_app().routes}
+    assert {"/mcp", "/sse", "/messages"} <= paths
