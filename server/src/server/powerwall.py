@@ -28,6 +28,9 @@ def get_connection() -> pypowerwall.Powerwall:
                 timezone=timezone(),
                 cachefile=os.path.join(cache_dir, ".powerwall"),
                 authpath=cache_dir,
+                # The gateway's Wi-Fi password (on its label). Optional: with it, pypowerwall reads every
+                # string on both inverters over TEDAPI (192.168.91.1); without it, only the leader's inputs.
+                gw_pwd=os.getenv("PW_GW_PWD", "").strip() or None,
             )
             if not pw.is_connected():
                 raise PowerwallError(f"Could not log in to the Powerwall gateway at {os.getenv('PW_HOST')}")
