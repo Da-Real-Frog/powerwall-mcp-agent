@@ -52,3 +52,13 @@ def read_status(pw) -> dict:
     if missing:
         raise PowerwallError(f"The gateway returned no value for: {', '.join(missing)}")
     return status
+
+
+def get_cloud_connection() -> pypowerwall.Powerwall:
+    """Tesla cloud connection, used only as the fallback for reserve writes.
+
+    Needs a one-time sign-in that saves tokens in PW_CACHE_DIR (see the README); without it this fails.
+    """
+    cache_dir = os.getenv("PW_CACHE_DIR", ".")
+    return pypowerwall.Powerwall(host="", email=require_env("PW_EMAIL"), timezone=timezone(), cloudmode=True,
+                                 authpath=cache_dir, cachefile=os.path.join(cache_dir, ".powerwall-cloud"))

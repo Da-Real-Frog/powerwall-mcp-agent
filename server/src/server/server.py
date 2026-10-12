@@ -1,7 +1,11 @@
 """MCP server exposing Powerwall telemetry, the solar forecast and weather alerts as read-only tools."""
+import json
 import os
 import time
 from contextlib import asynccontextmanager
+from dataclasses import asdict
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import uvicorn
 from dotenv import load_dotenv
@@ -9,7 +13,7 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from starlette.applications import Starlette
 
-from . import collector, forecast, history, powerwall, weather
+from . import collector, forecast, health, history, powerwall, reserve, weather
 from .config import ConfigError, load_site, location, timezone
 
 # Load environment variables from .env (Docker passes them with --env-file instead)
@@ -116,6 +120,95 @@ def get_energy_summary(days: int = 7) -> dict:
     if not 1 <= days <= 366:
         raise ToolError("days must be between 1 and 366")
     return history.energy_summary(collector.get_store(), days, int(time.time()), timezone())
+
+
+@mcp.tool()
+def get_health_report() -> dict:
+    """
+    Runs the health checks now over the recorded readings and returns what they find: a string producing
+    nothing or under half of its neighbours (per panel, averaged over 15 minutes), an input missing from
+    the gateway's readings, the grid being down, or no recent reading from the gateway. Also lists the
+    alerts currently open. Read-only: it does not open, close or send alerts.
+    """
+    try:
+        site = load_site()
+    except ConfigError as e:
+        raise ToolError(str(e)) from e
+    running = collector.get_collector()
+    now = int(time.time())
+    last_success = running.last_success if running else None
+    started = running.started if running else now
+    findings = health.evaluate(site, collector.get_store(), last_success, started, now)
+    return {
+        "healthy": not findings,
+        "findings": [{"kind": f.kind, "input": f.subject, "severity": f.severity, "message": f.message}
+                     for f in findings],
+        "open_alerts": _alerts(collector.get_store().open_alerts()),
+        "collector": collector.info(),
+    }
+
+
+@mcp.tool()
+def get_alerts(days: int = 7) -> dict:
+    """
+    Alerts raised by the health checks: every open alert plus those resolved in the last `days` days
+    (default 7), with when each opened, was last seen and resolved. Use it to build a history of faults,
+    for example to report a failing string to Tesla.
+    """
+    if not 1 <= days <= 366:
+        raise ToolError("days must be between 1 and 366")
+    return {"alerts": _alerts(collector.get_store().alerts_since(int(time.time()) - days * 86400))}
+
+
+@mcp.tool()
+def explain_reserve_decision() -> dict:
+    """
+    Explains the backup reserve the controller would choose right now and why: the rule that matched
+    (1 grid down: leave it; 2 severe NWS warning: 100%; 3 severe watch: 80%; 4 tomorrow's solar below
+    daytime use: 60%; 5 solar covers daytime use but not a full recharge: 40%; 6 otherwise: 20%), the inputs
+    behind it, and whether a safeguard (minimum step, one change per hour, pause after a manual change)
+    holds it back. Also says whether the controller is in dry-run or live mode. Changes nothing.
+    """
+    try:
+        site = load_site()
+        now = int(time.time())
+        inputs = collector.gather_reserve_inputs(collector.get_store(), site.reserve, now)
+    except (ConfigError, powerwall.PowerwallError) as e:
+        raise ToolError(str(e)) from e
+    running = collector.get_collector()
+    controller = running.controller if running and running.controller else reserve.Controller(
+        collector.get_store(), site.reserve, live=False, tz=timezone())
+    return {"mode": collector.reserve_mode(), "inputs": asdict(inputs), **controller.preview(inputs, now)}
+
+
+@mcp.tool()
+def get_reserve_log(days: int = 7) -> dict:
+    """
+    The reserve controller's decisions over the last `days` days (default 7), one entry each time the rule,
+    target or action changed: when, which rule, the target and the reserve at the time, and what it did
+    (set, would_set in dry-run, waiting, paused, none or failed), with the reason.
+    """
+    if not 1 <= days <= 90:
+        raise ToolError("days must be between 1 and 90")
+    zone = ZoneInfo(timezone())
+    entries = []
+    for d in collector.get_store().reserve_decisions(int(time.time()) - days * 86400):
+        details = json.loads(d["details"] or "{}")
+        entries.append({"time": datetime.fromtimestamp(d["ts"], zone).isoformat(timespec="minutes"),
+                        "rule": d["rule"], "target": d["target"], "reserve_then": d["current"],
+                        "action": d["action"], "mode": d["mode"], "reason": details.get("reason"),
+                        "note": details.get("note")})
+    return {"mode": collector.reserve_mode(), "decisions": entries}
+
+
+def _alerts(rows: list[dict]) -> list[dict]:
+    zone = ZoneInfo(timezone())
+
+    def stamp(t):
+        return None if t is None else datetime.fromtimestamp(t, zone).isoformat(timespec="minutes")
+
+    return [{"kind": a["kind"], "input": a["subject"], "message": a["message"], "opened": stamp(a["opened_at"]),
+             "last_seen": stamp(a["last_seen"]), "resolved": stamp(a["resolved_at"])} for a in rows]
 
 
 def create_app() -> Starlette:

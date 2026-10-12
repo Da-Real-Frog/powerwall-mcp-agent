@@ -35,11 +35,30 @@ class Input:
 
 
 @dataclass(frozen=True)
+class ReserveSettings:
+    """Reserve percentages per rule and the controller's safeguards, from [reserve] in site.toml."""
+    warning: float = 100
+    watch: float = 80
+    low_solar: float = 60
+    partial: float = 40
+    default: float = 20
+    warning_hold_hours: float = 6
+    battery_kwh: float = 27
+    daytime_use_kwh: float = 15  # used until 14 days of history exist
+    overnight_use_kwh: float = 10
+    min_change: float = 5
+    min_interval_minutes: float = 60
+    manual_pause_hours: float = 24
+
+
+@dataclass(frozen=True)
 class Site:
     derate: float
     panel_watts: float
     arrays: tuple[Array, ...]
     inputs: tuple[Input, ...]
+    unused_inputs: frozenset[str] = frozenset()  # gateway letters with nothing wired to them
+    reserve: ReserveSettings = ReserveSettings()
 
 
 def load_site(path: str | Path | None = None) -> Site:
@@ -76,13 +95,24 @@ def load_site(path: str | Path | None = None) -> Site:
             )
             for i in raw.get("inputs", [])
         )
+        unused = frozenset(str(x) for x in raw.get("unused_inputs", []))
+        reserve = ReserveSettings(**{k: float(v) for k, v in raw.get("reserve", {}).items()})
     except (KeyError, TypeError, ValueError) as e:
         raise ConfigError(f"Site file {path} is missing or has an invalid field: {e}") from e
+    for name in ("warning", "watch", "low_solar", "partial", "default"):
+        if not 0 <= getattr(reserve, name) <= 100:
+            raise ConfigError(f"reserve.{name} must be between 0 and 100")
 
     if not arrays:
         raise ConfigError(f"Site file {path} defines no arrays")
     if not 0 < derate <= 1:
         raise ConfigError(f"derate must be between 0 and 1, got {derate}")
+
+    letters = [i.input for i in inputs if i.input]
+    if len(letters) != len(set(letters)):
+        raise ConfigError("Each input letter can be mapped only once")
+    if unused & set(letters):
+        raise ConfigError(f"Inputs listed as unused are also mapped: {sorted(unused & set(letters))}")
 
     names = {a.name for a in arrays}
     for i in inputs:
@@ -94,7 +124,8 @@ def load_site(path: str | Path | None = None) -> Site:
             if wired != a.panels:
                 raise ConfigError(f"Array {a.name} has {a.panels} panels but its inputs wire {wired}")
 
-    return Site(derate=derate, panel_watts=panel_watts, arrays=arrays, inputs=inputs)
+    return Site(derate=derate, panel_watts=panel_watts, arrays=arrays, inputs=inputs, unused_inputs=unused,
+                reserve=reserve)
 
 
 def require_env(name: str) -> str:
