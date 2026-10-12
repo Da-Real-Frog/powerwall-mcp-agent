@@ -20,6 +20,47 @@ No password goes in a file, a command line or this repo. Wi-Fi passwords are typ
 `nmcli --ask` prompts. NetworkManager keeps them on the MacBook in a root-only file so it
 can reconnect after a reboot.
 
+## Using a Raspberry Pi instead
+
+A Raspberry Pi 3 B+ or newer does the same job with less setup: its Wi-Fi works out of the
+box, and it boots again on its own after a power cut. On a Pi, the TEG interface is `wlan0`
+and the home side is `eth0`. Do the steps in this section instead of steps 0 to 3, then carry
+on from step 4.
+
+**Write the SD card (on your Mac):**
+
+1. Install **Raspberry Pi Imager** from <https://www.raspberrypi.com/software/>.
+2. Choose your Pi model, then **Raspberry Pi OS (other) ▸ Raspberry Pi OS Lite (64-bit)**.
+   "Lite" has no desktop, which is all a bridge needs. Then choose the microSD card.
+3. When it offers to customise the OS, set:
+   - **Hostname:** `garage-bridge`
+   - **Username and password:** your own (not `pi`)
+   - **Wireless LAN:** leave the network name and password empty, and set only the
+     **country** (e.g. US). The TEG-23A password is typed later at an `nmcli --ask` prompt.
+   - **Services:** turn on **SSH**, with password login or your Mac's public key.
+4. Write the card. It erases it.
+
+**First boot (anywhere with Ethernet):**
+
+1. Put the card in the Pi, plug Ethernet into your network, then plug in the kit's power
+   supply. Give it a couple of minutes.
+2. From your Mac: `ssh <user>@garage-bridge.local`. If the name doesn't resolve, find its
+   address in your router's client list.
+3. Update it and make sure Wi-Fi isn't blocked:
+   ```
+   sudo apt update && sudo apt full-upgrade -y
+   sudo apt install -y git
+   sudo raspi-config nonint do_wifi_country US
+   sudo rfkill unblock wifi
+   sudo reboot
+   ```
+4. After it comes back, `nmcli device` should list `eth0` (connected) and `wlan0`
+   (disconnected).
+
+Now follow steps 4 to 7 below with `<teg-if>` = `wlan0` and `<home-if>` = `eth0`, so step 5 is
+`sudo ./bridge/setup-bridge.sh wlan0 eth0`. Use the power supply from the kit: a weak phone
+charger makes the Pi's Wi-Fi drop out.
+
 ## 0. Before wiping anything
 
 1. In the garage, open Big Sur's Wi-Fi menu and check that **TEG-23A** shows up with at least
