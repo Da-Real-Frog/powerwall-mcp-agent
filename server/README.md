@@ -43,10 +43,7 @@ A new finding opens an alert and sends an ntfy notification. The alert closes, w
 ## Collector
 While the server runs, a background thread reads the gateway every 30 seconds and saves the readings to SQLite (`powerwall.db` in `PW_CACHE_DIR`, so `/data` in Docker). Raw readings are kept for 90 days; five-minute averages are kept forever and back the history and energy tools. A failed read is logged and retried on the next poll.
 
-Without `PW_GW_PWD`, the gateway's local API on current firmware reports only the four inputs of the main Powerwall+ (A to D). With it, pypowerwall reads every input on both inverters over TEDAPI (A to D, then A1 to D1, and so on). TEDAPI is only served at the gateway's internal address, so the Docker host needs a route to it through the gateway's LAN address:
-```bash
-sudo ip route add 192.168.91.1 via <PW_HOST>
-```
+Inputs are recorded as `PW<n>-<letter>` (for example `PW2-A`), using the Powerwall numbers from the permit plans; `site.toml` maps each inverter's serial to its number. With `PW_GW_PWD` set, the collector reads every input on both inverters over TEDAPI. TEDAPI is only served at the gateway's internal address, 192.168.91.1, which on this site is reached through a Wi-Fi bridge next to the gateway (see [bridge/README.md](../bridge/README.md)). Without it, the gateway's local API on current firmware reports only the inputs of one inverter (`local_api_powerwall` in `site.toml`). If TEDAPI stops answering, battery and grid readings keep being recorded and the health check reports the stale string data.
 
 Failures are reported as MCP tool errors, so clients can tell an error from a reading. Neither weather API needs a key.
 

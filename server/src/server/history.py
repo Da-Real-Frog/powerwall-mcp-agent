@@ -15,7 +15,7 @@ def site_layout(site: Site) -> dict:
             for a in site.arrays
         ],
         "inputs": [
-            {"powerwall": i.powerwall, "input": i.input or None, "array": i.array,
+            {"powerwall": i.powerwall, "input": i.key or None, "array": i.array,
              "panels_per_string": i.panels_per_string, "strings": i.strings,
              "panels": i.panels_per_string * i.strings}
             for i in site.inputs
@@ -27,7 +27,7 @@ def site_layout(site: Site) -> dict:
 def string_status(site: Site, latest: tuple[int, list[dict]], now: int, tz: str) -> dict:
     """The latest reading of each input, with the array and panel count from site.toml where the letter is mapped."""
     ts, rows = latest
-    by_letter = {i.input: i for i in site.inputs if i.input}
+    by_letter = {i.key: i for i in site.inputs if i.key}
     inputs = []
     for r in rows:
         entry = {"input": r["input"], "volts": r["volts"], "amps": r["amps"], "watts": r["watts"]}

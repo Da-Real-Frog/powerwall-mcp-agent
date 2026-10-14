@@ -249,3 +249,12 @@ class Store:
                 changes.append(r)
                 last = key
         return changes
+
+    def prefix_unnamed_inputs(self, prefix: str) -> None:
+        """Renames inputs stored as a bare letter ("A") to the per-Powerwall name ("PW2-A"). Idempotent."""
+        with self._lock, self._db:
+            for table in ("strings", "strings_5min"):
+                self._db.execute(f"UPDATE OR IGNORE {table} SET input = ? || input WHERE input NOT LIKE '%-%'",
+                                 (prefix,))
+            self._db.execute("UPDATE alerts SET subject = ? || subject, key = kind || ':' || ? || subject "
+                             "WHERE subject IS NOT NULL AND subject NOT LIKE '%-%'", (prefix, prefix))
