@@ -3,11 +3,13 @@ import os
 import threading
 
 import pypowerwall
+from pypowerwall.tedapi import TEDAPI
 
-from .config import require_env, timezone
+from .config import Site, require_env, timezone
 
 _lock = threading.Lock()
 _pw: pypowerwall.Powerwall | None = None
+_tedapi: TEDAPI | None = None
 
 
 class PowerwallError(Exception):
@@ -28,9 +30,6 @@ def get_connection() -> pypowerwall.Powerwall:
                 timezone=timezone(),
                 cachefile=os.path.join(cache_dir, ".powerwall"),
                 authpath=cache_dir,
-                # The gateway's Wi-Fi password (on its label). Optional: with it, pypowerwall reads every
-                # string on both inverters over TEDAPI (192.168.91.1); without it, only the leader's inputs.
-                gw_pwd=os.getenv("PW_GW_PWD", "").strip() or None,
             )
             if not pw.is_connected():
                 raise PowerwallError(f"Could not log in to the Powerwall gateway at {os.getenv('PW_HOST')}")
@@ -62,3 +61,64 @@ def get_cloud_connection() -> pypowerwall.Powerwall:
     cache_dir = os.getenv("PW_CACHE_DIR", ".")
     return pypowerwall.Powerwall(host="", email=require_env("PW_EMAIL"), timezone=timezone(), cloudmode=True,
                                  authpath=cache_dir, cachefile=os.path.join(cache_dir, ".powerwall-cloud"))
+
+
+def tedapi_enabled() -> bool:
+    return bool(os.getenv("PW_GW_PWD", "").strip())
+
+
+def get_tedapi() -> TEDAPI:
+    """TEDAPI session at the gateway's internal address (192.168.91.1), logged in with the label password.
+
+    It reports every input on both inverters, where the local API on current firmware reports only one.
+    """
+    global _tedapi
+    with _lock:
+        if _tedapi is None:
+            api = TEDAPI(require_env("PW_GW_PWD"), timezone=timezone())
+            if not api.connect():
+                raise PowerwallError("Could not log in to TEDAPI at 192.168.91.1 (check the route and PW_GW_PWD)")
+            _tedapi = api
+        return _tedapi
+
+
+def reset_tedapi() -> None:
+    """Drops the session so the next read logs in again, for example after the bridge comes back."""
+    global _tedapi
+    with _lock:
+        _tedapi = None
+
+
+def strings_from_vitals(vitals: dict, site: Site) -> dict:
+    """Per-input readings from TEDAPI vitals, named "PW<n>-<letter>" from the site's inverter serials.
+
+    An inverter missing from site.inverters is named by its serial suffix instead.
+    """
+    result = {}
+    for device, values in vitals.items():
+        if not device.startswith("PVAC--"):
+            continue
+        suffix = device[-6:]
+        number = site.inverters.get(suffix)
+        prefix = f"PW{number}" if number else suffix
+        for key, value in values.items():
+            for field, prefix_key in (("Voltage", "PVAC_PVMeasuredVoltage_"), ("Current", "PVAC_PVCurrent_"),
+                                      ("Power", "PVAC_PVMeasuredPower_"), ("State", "PVAC_PvState_")):
+                if key.startswith(prefix_key) and len(key) == len(prefix_key) + 1:
+                    result.setdefault(f"{prefix}-{key[-1]}", {})[field] = value
+    return result
+
+
+def read_strings(pw, site: Site) -> dict:
+    """Every input's readings: over TEDAPI when PW_GW_PWD is set, else the local API's single inverter."""
+    if tedapi_enabled():
+        try:
+            vitals = get_tedapi().vitals()
+        except Exception:
+            reset_tedapi()
+            raise
+        if not vitals:
+            reset_tedapi()
+            raise PowerwallError("TEDAPI returned no vitals")
+        return strings_from_vitals(vitals, site)
+    return {f"PW{site.local_api_powerwall}-{name}": values for name, values in (pw.strings() or {}).items()}

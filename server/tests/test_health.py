@@ -15,31 +15,31 @@ def buckets(watts: dict[str, float], count: int = 3) -> list[dict]:
 
 def test_dead_string_is_found_against_its_neighbours():
     # A and B have 6 panels, D has 4: 300 W is 50 W per panel
-    findings = health.check_strings(load_site(), buckets({"A": 300, "B": 0, "D": 200, "C": 0}))
-    assert [(f.kind, f.subject) for f in findings] == [("string_dead", "B")]
+    findings = health.check_strings(load_site(), buckets({"PW2-A": 300, "PW2-B": 0, "PW2-D": 200, "PW2-C": 0}))
+    assert [(f.kind, f.subject) for f in findings] == [("string_dead", "PW2-B")]
     assert "MP3, 6 panels" in findings[0].message
 
 
 def test_low_string_is_found_per_panel():
     # D makes 80 W on 4 panels (20 W each) against 50 W per panel on A and B
-    findings = health.check_strings(load_site(), buckets({"A": 300, "B": 300, "D": 80}))
-    assert [(f.kind, f.subject) for f in findings] == [("string_low", "D")]
+    findings = health.check_strings(load_site(), buckets({"PW2-A": 300, "PW2-B": 300, "PW2-D": 80}))
+    assert [(f.kind, f.subject) for f in findings] == [("string_low", "PW2-D")]
 
 
 def test_equal_output_per_panel_is_healthy():
-    assert health.check_strings(load_site(), buckets({"A": 300, "B": 290, "D": 200})) == []
+    assert health.check_strings(load_site(), buckets({"PW2-A": 300, "PW2-B": 290, "PW2-D": 200})) == []
 
 
 def test_no_verdict_in_weak_sun():
-    assert health.check_strings(load_site(), buckets({"A": 60, "B": 0, "D": 40})) == []
+    assert health.check_strings(load_site(), buckets({"PW2-A": 60, "PW2-B": 0, "PW2-D": 40})) == []
 
 
 def test_short_dip_is_not_a_fault():
-    assert health.check_strings(load_site(), buckets({"A": 300, "B": 0, "D": 200}, count=2)) == []
+    assert health.check_strings(load_site(), buckets({"PW2-A": 300, "PW2-B": 0, "PW2-D": 200}, count=2)) == []
 
 
 def test_missing_input_and_grid_and_stale_collector():
-    assert [f.subject for f in health.check_inputs_present(load_site(), {"A", "C", "D"})] == ["B"]
+    assert [f.subject for f in health.check_inputs_present(load_site(), {"PW2-A", "PW2-C", "PW2-D"})] == ["PW2-B"]
     assert health.check_grid({"grid_status": "DOWN", "battery_percent": 64.0})[0].kind == "grid_down"
     assert health.check_grid({"grid_status": "UP", "battery_percent": 64.0}) == []
     assert health.check_collector(NOW - 600, NOW - 3600, NOW)[0].kind == "collector_stale"
@@ -59,7 +59,7 @@ def test_alert_opens_once_and_resolves_after_three_clear_checks(tmp_path):
     store = Store(str(tmp_path / "pw.db"))
     notifier = RecordingNotifier()
     monitor = Monitor(load_site(), store, notifier, "America/Chicago")
-    dead = [Finding("string_dead", "B", "high", "input B is producing nothing")]
+    dead = [Finding("string_dead", "PW2-B", "high", "input B is producing nothing")]
 
     monitor.apply(dead, NOW)
     monitor.apply(dead, NOW + 300)
@@ -79,7 +79,7 @@ def test_alert_opens_once_and_resolves_after_three_clear_checks(tmp_path):
 def test_a_clear_check_in_between_does_not_resolve(tmp_path):
     store = Store(str(tmp_path / "pw.db"))
     monitor = Monitor(load_site(), store, RecordingNotifier(), "America/Chicago")
-    dead = [Finding("string_dead", "B", "high", "dead")]
+    dead = [Finding("string_dead", "PW2-B", "high", "dead")]
     for findings in (dead, [], [], dead, [], []):
         monitor.apply(findings, NOW)
     assert len(store.open_alerts()) == 1
@@ -89,14 +89,14 @@ def test_evaluate_reads_from_the_store(tmp_path):
     store = Store(str(tmp_path / "pw.db"))
     status = {"battery_level_percent": 80.0, "grid_status": "UP", "grid_power_watts": 0.0,
               "solar_power_watts": 500.0, "home_usage_watts": 500.0, "battery_power_watts": 0.0}
-    strings = {"A": {"Power": 300}, "B": {"Power": 0}, "C": {"Power": 0}, "D": {"Power": 200}}
+    strings = {"PW2-A": {"Power": 300}, "PW2-B": {"Power": 0}, "PW2-C": {"Power": 0}, "PW2-D": {"Power": 200}}
     current = NOW // BUCKET * BUCKET
     for ts in range(current - 3 * BUCKET, NOW, 30):
         store.add(ts, status, strings)
     store.rollup(0)
 
     findings = health.evaluate(load_site(), store, last_success=NOW - 30, started=NOW - 3600, now=NOW)
-    assert [(f.kind, f.subject) for f in findings] == [("string_dead", "B")]
+    assert [(f.kind, f.subject) for f in findings] == [("string_dead", "PW2-B")]
 
 
 def test_ntfy_request(monkeypatch):
@@ -114,3 +114,14 @@ def test_ntfy_request(monkeypatch):
 
     health.Notifier(None).send("Title", "Body")  # unset: sends nothing
     assert len(calls) == 1
+
+
+def test_stale_strings_point_at_the_bridge(tmp_path):
+    store = Store(str(tmp_path / "pw.db"))
+    status = {"battery_level_percent": 80.0, "grid_status": "UP", "grid_power_watts": 0.0,
+              "solar_power_watts": 500.0, "home_usage_watts": 500.0, "battery_power_watts": 0.0}
+    store.add(NOW - 900, status, {"PW2-A": {"Power": 300}})
+    store.add(NOW - 30, status, {})  # the gateway still answers, TEDAPI does not
+
+    findings = health.evaluate(load_site(), store, last_success=NOW - 30, started=NOW - 3600, now=NOW)
+    assert [f.kind for f in findings] == ["strings_stale"]  # not one input_missing per input

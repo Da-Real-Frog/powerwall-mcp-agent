@@ -1,7 +1,7 @@
 """Site layout (site.toml) and runtime settings (environment variables)."""
 import os
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 DEFAULT_SITE_FILE = Path(__file__).resolve().parents[2] / "site.toml"
@@ -33,6 +33,11 @@ class Input:
     panels_per_string: int
     strings: int
 
+    @property
+    def key(self) -> str:
+        """The name the collector records this input under, such as "PW2-A", or "" while unmapped."""
+        return f"PW{self.powerwall}-{self.input}" if self.input else ""
+
 
 @dataclass(frozen=True)
 class ReserveSettings:
@@ -57,7 +62,9 @@ class Site:
     panel_watts: float
     arrays: tuple[Array, ...]
     inputs: tuple[Input, ...]
-    unused_inputs: frozenset[str] = frozenset()  # gateway letters with nothing wired to them
+    unused_inputs: frozenset[str] = frozenset()  # input names ("PW2-C") with nothing wired to them
+    inverters: dict[str, int] = field(default_factory=dict)  # inverter serial suffix -> Powerwall number
+    local_api_powerwall: int = 1  # the Powerwall whose inputs the gateway's local API reports
     reserve: ReserveSettings = ReserveSettings()
 
 
@@ -96,6 +103,8 @@ def load_site(path: str | Path | None = None) -> Site:
             for i in raw.get("inputs", [])
         )
         unused = frozenset(str(x) for x in raw.get("unused_inputs", []))
+        inverters = {str(k): int(v) for k, v in raw.get("inverters", {}).items()}
+        local_api_powerwall = int(raw.get("local_api_powerwall", 1))
         reserve = ReserveSettings(**{k: float(v) for k, v in raw.get("reserve", {}).items()})
     except (KeyError, TypeError, ValueError) as e:
         raise ConfigError(f"Site file {path} is missing or has an invalid field: {e}") from e
@@ -108,11 +117,11 @@ def load_site(path: str | Path | None = None) -> Site:
     if not 0 < derate <= 1:
         raise ConfigError(f"derate must be between 0 and 1, got {derate}")
 
-    letters = [i.input for i in inputs if i.input]
-    if len(letters) != len(set(letters)):
-        raise ConfigError("Each input letter can be mapped only once")
-    if unused & set(letters):
-        raise ConfigError(f"Inputs listed as unused are also mapped: {sorted(unused & set(letters))}")
+    keys = [i.key for i in inputs if i.key]
+    if len(keys) != len(set(keys)):
+        raise ConfigError("Each Powerwall input letter can be mapped only once")
+    if unused & set(keys):
+        raise ConfigError(f"Inputs listed as unused are also mapped: {sorted(unused & set(keys))}")
 
     names = {a.name for a in arrays}
     for i in inputs:
@@ -125,7 +134,7 @@ def load_site(path: str | Path | None = None) -> Site:
                 raise ConfigError(f"Array {a.name} has {a.panels} panels but its inputs wire {wired}")
 
     return Site(derate=derate, panel_watts=panel_watts, arrays=arrays, inputs=inputs, unused_inputs=unused,
-                reserve=reserve)
+                inverters=inverters, local_api_powerwall=local_api_powerwall, reserve=reserve)
 
 
 def require_env(name: str) -> str:

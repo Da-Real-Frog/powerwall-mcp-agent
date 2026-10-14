@@ -28,8 +28,8 @@ CLEAR_AFTER = 3
 
 @dataclass(frozen=True)
 class Finding:
-    kind: str  # string_dead, string_low, input_missing, grid_down, collector_stale
-    subject: str | None  # the input letter, or None for site-wide findings
+    kind: str  # string_dead, string_low, input_missing, strings_stale, grid_down, collector_stale
+    subject: str | None  # the input name ("PW2-A"), or None for site-wide findings
     severity: str  # "high" or "default", used as the ntfy priority
     message: str
 
@@ -50,25 +50,25 @@ def check_strings(site: Site, buckets: list[dict]) -> list[Finding]:
             watts.setdefault(b["input"], []).append(b["watts"])
     per_panel = {}
     for i in site.inputs:
-        samples = watts.get(i.input) if i.input else None
+        samples = watts.get(i.key) if i.key else None
         if samples and len(samples) >= WINDOW_BUCKETS:
-            per_panel[i.input] = (i, sum(samples) / len(samples) / (i.panels_per_string * i.strings))
+            per_panel[i.key] = (i, sum(samples) / len(samples) / (i.panels_per_string * i.strings))
 
     findings = []
-    for letter, (wired, w) in per_panel.items():
-        peers = [pw for other, (oi, pw) in per_panel.items() if other != letter and oi.array == wired.array]
+    for name, (wired, w) in per_panel.items():
+        peers = [pw for other, (oi, pw) in per_panel.items() if other != name and oi.array == wired.array]
         if not peers:
             continue
         reference = statistics.median(peers)
         if reference < MIN_PEER_W_PER_PANEL:
             continue
-        where = f"input {letter} ({wired.array}, {wired.panels_per_string * wired.strings} panels)"
+        where = f"input {name} ({wired.array}, {wired.panels_per_string * wired.strings} panels)"
         if w < DEAD_W_PER_PANEL:
-            findings.append(Finding("string_dead", letter, "high",
+            findings.append(Finding("string_dead", name, "high",
                                     f"{where} is producing nothing while its neighbours make "
                                     f"{reference:.0f} W per panel"))
         elif w < LOW_FRACTION * reference:
-            findings.append(Finding("string_low", letter, "default",
+            findings.append(Finding("string_low", name, "default",
                                     f"{where} makes {w:.0f} W per panel, under half of its neighbours' "
                                     f"{reference:.0f} W"))
     return findings
@@ -77,9 +77,9 @@ def check_strings(site: Site, buckets: list[dict]) -> list[Finding]:
 def check_inputs_present(site: Site, latest_inputs: set[str]) -> list[Finding]:
     """A mapped input missing from the latest poll usually means its inverter has dropped off."""
     return [
-        Finding("input_missing", i.input, "high",
-                f"Input {i.input} ({i.array}) is missing from the gateway's readings; its inverter may be offline")
-        for i in site.inputs if i.input and i.input not in latest_inputs
+        Finding("input_missing", i.key, "high",
+                f"Input {i.key} ({i.array}) is missing from the gateway's readings; its inverter may be offline")
+        for i in site.inputs if i.key and i.key not in latest_inputs
     ]
 
 
@@ -106,7 +106,11 @@ def evaluate(site: Site, store: Store, last_success: int | None, started: int, n
     current = now // BUCKET * BUCKET  # the bucket still filling is left out
     findings += check_strings(site, store.string_buckets(current - WINDOW_BUCKETS * BUCKET, current))
     latest = store.latest_strings()
-    if latest:
+    if latest and now - latest[0] > STALE_SECONDS:
+        findings.append(Finding("strings_stale", None, "high",
+                                f"No string readings for {(now - latest[0]) // 60} minutes; the gateway is answering, "
+                                "so the TEDAPI bridge (192.168.91.1) is probably down"))
+    elif latest:
         findings += check_inputs_present(site, {r["input"] for r in latest[1]})
     findings += check_grid(store.latest_reading())
     return findings

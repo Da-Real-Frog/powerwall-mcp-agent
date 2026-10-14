@@ -5,7 +5,7 @@ import threading
 import time
 
 from . import forecast, health, powerwall, reserve, weather
-from .config import load_site, location, timezone
+from .config import Site, load_site, location, timezone
 from .storage import BUCKET, Store
 
 log = logging.getLogger(__name__)
@@ -21,8 +21,9 @@ def db_path() -> str:
 
 class Collector:
     def __init__(self, store: Store, interval: float, monitor: health.Monitor | None = None,
-                 controller: reserve.Controller | None = None):
+                 controller: reserve.Controller | None = None, site: Site | None = None):
         self.store = store
+        self.site = site or load_site()
         self.interval = interval
         self.monitor = monitor
         self.controller = controller
@@ -30,13 +31,20 @@ class Collector:
         self.started = int(time.time())
         self.last_success: int | None = None
         self.last_error: str | None = None
+        self.strings_error: str | None = None
         self._last_rollup = 0.0
         self._last_check = 0.0
 
     def poll_once(self, pw) -> None:
         now = int(time.time())
         status = powerwall.read_status(pw)
-        strings = pw.strings() or {}
+        try:
+            strings = powerwall.read_strings(pw, self.site)
+            self.strings_error = None
+        except Exception as e:  # keep the battery and grid readings; the health check flags stale strings
+            strings = {}
+            self.strings_error = f"{time.strftime('%Y-%m-%dT%H:%M:%S')}: {e}"
+            log.warning("Reading the strings failed: %s", e)
         self.store.add(now, status, strings)
         self.last_success = now
         self.last_error = None
@@ -81,6 +89,8 @@ class Collector:
             "poll_seconds": self.interval,
             "last_success": self.last_success,
             "last_error": self.last_error,
+            "strings_source": "tedapi" if powerwall.tedapi_enabled() else "local_api",
+            "strings_error": self.strings_error,
         }
 
 
@@ -100,12 +110,14 @@ def start() -> Collector:
     """Starts polling in a daemon thread. Called once from main()."""
     global _collector
     site = load_site()
+    # Readings from before inputs were named per Powerwall all came from the local API's inverter
+    get_store().prefix_unnamed_inputs(f"PW{site.local_api_powerwall}-")
     notifier = health.notifier_from_env()
     monitor = health.Monitor(site, get_store(), notifier, timezone(), os.getenv("HEARTBEAT_URL", "").strip() or None)
     controller = reserve.Controller(
         get_store(), site.reserve, live=reserve_mode() == "live", tz=timezone(), notifier=notifier,
         writer=reserve.make_writer(powerwall.get_connection, powerwall.get_cloud_connection))
-    _collector = Collector(get_store(), float(os.getenv("PW_POLL_SECONDS", "30")), monitor, controller)
+    _collector = Collector(get_store(), float(os.getenv("PW_POLL_SECONDS", "30")), monitor, controller, site)
     threading.Thread(target=_collector.run, name="collector", daemon=True).start()
     return _collector
 
