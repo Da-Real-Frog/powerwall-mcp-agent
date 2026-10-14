@@ -77,6 +77,31 @@ wifi.powersave=2
 CONF
 fi
 
+echo "==> Installing the Wi-Fi watchdog"
+install -m 755 "$(dirname "$(readlink -f "$0")")/teg-watchdog.sh" /usr/local/sbin/teg-watchdog
+cat > /etc/systemd/system/teg-watchdog.service <<UNIT
+[Unit]
+Description=Rejoin the Powerwall gateway Wi-Fi if it dropped
+After=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/teg-watchdog $TEG_IF
+UNIT
+cat > /etc/systemd/system/teg-watchdog.timer <<'UNIT'
+[Unit]
+Description=Check the Powerwall gateway Wi-Fi every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=1min
+
+[Install]
+WantedBy=timers.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now teg-watchdog.timer
+
 echo
 echo "Done. Reboot once (sudo reboot) so the lid and Wi-Fi settings take effect."
 # shellcheck disable=SC2028  # the \n is meant to print literally
