@@ -39,7 +39,7 @@ def test_short_dip_is_not_a_fault():
 
 
 def test_missing_input_and_grid_and_stale_collector():
-    assert [f.subject for f in health.check_inputs_present(load_site(), {"PW2-A", "PW2-C", "PW2-D"})] == ["PW2-B"]
+    assert [f.subject for f in health.check_inputs_present(load_site(), {"PW1-B", "PW1-C", "PW1-D", "PW2-A", "PW2-C", "PW2-D"})] == ["PW2-B"]
     assert health.check_grid({"grid_status": "DOWN", "battery_percent": 64.0})[0].kind == "grid_down"
     assert health.check_grid({"grid_status": "UP", "battery_percent": 64.0}) == []
     assert health.check_collector(NOW - 600, NOW - 3600, NOW)[0].kind == "collector_stale"
@@ -89,7 +89,8 @@ def test_evaluate_reads_from_the_store(tmp_path):
     store = Store(str(tmp_path / "pw.db"))
     status = {"battery_level_percent": 80.0, "grid_status": "UP", "grid_power_watts": 0.0,
               "solar_power_watts": 500.0, "home_usage_watts": 500.0, "battery_power_watts": 0.0}
-    strings = {"PW2-A": {"Power": 300}, "PW2-B": {"Power": 0}, "PW2-C": {"Power": 0}, "PW2-D": {"Power": 200}}
+    strings = {"PW1-B": {"Power": 150}, "PW1-C": {"Power": 175}, "PW1-D": {"Power": 90},
+               "PW2-A": {"Power": 300}, "PW2-B": {"Power": 0}, "PW2-C": {"Power": 0}, "PW2-D": {"Power": 200}}
     current = NOW // BUCKET * BUCKET
     for ts in range(current - 3 * BUCKET, NOW, 30):
         store.add(ts, status, strings)

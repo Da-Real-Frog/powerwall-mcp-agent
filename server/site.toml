@@ -48,26 +48,28 @@ azimuth = 300
 # panel, which fits 6 + 6 + 4 panels. So the permit's "2 x 6 paralleled" is wired as two
 # separate inputs; C is disabled. TEDAPI confirmed A, B and D active and C disabled.
 #
-# Powerwall 1 (H000RA) has B, C and D active and A disabled. Which of them is the 3-, 6- and
-# 7-panel string is still to be matched from their voltages, so their letters stay empty.
+# Powerwall 1 (H000RA) has B, C and D active and A disabled. Matched from the readings of
+# 2026-10-14 at ~34-35 V per panel: B is the 6-panel and C the 7-panel MP1 string (and they made
+# the same ~25 W per panel), and D is the 3-panel MP2 string. That matches the permit's
+# Powerwall+ 1 strings (MP2 1x3, MP1 1x6, MP1 1x7).
 
 [[inputs]]
 powerwall = 1
-input = ""
+input = "D"
 array = "MP2"
 panels_per_string = 3
 strings = 1
 
 [[inputs]]
 powerwall = 1
-input = ""
+input = "B"
 array = "MP1"
 panels_per_string = 6
 strings = 1
 
 [[inputs]]
 powerwall = 1
-input = ""
+input = "C"
 array = "MP1"
 panels_per_string = 7
 strings = 1
