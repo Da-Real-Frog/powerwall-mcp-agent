@@ -129,7 +129,8 @@ sudo reboot
 
 The script enables IP forwarding, lets the home network reach `192.168.91.1` on port 443 (and
 ping) and nothing else on TEG-23A, saves those rules so they come back after a reboot, and
-turns off Wi-Fi power saving. It also sets "ignore lid close", which does nothing on a Pi.
+turns off Wi-Fi power saving. It also installs a watchdog ([`teg-watchdog.sh`](teg-watchdog.sh)) that
+checks `wlan0` every minute and rejoins TEG-23A if it has dropped. It also sets "ignore lid close", which does nothing on a Pi.
 It's safe to run again.
 
 ## 8. Give the Pi a fixed address
@@ -191,6 +192,15 @@ print(json.dumps({k: v[k] for k in v if k.startswith(('PVAC', 'PVS'))}, indent=1
 ## Living in the garage
 
 - It boots by itself when power comes back after an outage, and rejoins TEG-23A on its own.
+- If the gateway's Wi-Fi disappears for a moment (a gateway restart or update), NetworkManager
+  can give up on TEG-23A for good. The watchdog rejoins it within a minute or two.
+  `journalctl -u teg-watchdog --since today` shows each reconnect.
+- To add the watchdog to a bridge set up before it existed, pull the repo and re-run step 7:
+  ```
+  git -C powerwall-mcp-agent pull
+  sudo ./powerwall-mcp-agent/bridge/setup-bridge.sh wlan0 eth0
+  systemctl list-timers teg-watchdog.timer
+  ```
 - Check it from your Mac with `ssh <user>@<pi-ip> 'nmcli device; ip -br addr'`.
 - Keep it on the kit's power supply. `vcgencmd get_throttled` printing anything other than
   `throttled=0x0` means the supply is too weak or it's running hot.
