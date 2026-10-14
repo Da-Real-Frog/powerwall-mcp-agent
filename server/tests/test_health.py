@@ -39,7 +39,8 @@ def test_short_dip_is_not_a_fault():
 
 
 def test_missing_input_and_grid_and_stale_collector():
-    assert [f.subject for f in health.check_inputs_present(load_site(), {"PW1-B", "PW1-C", "PW1-D", "PW2-A", "PW2-C", "PW2-D"})] == ["PW2-B"]
+    present = {"PW1-B", "PW1-C", "PW1-D", "PW2-A", "PW2-C", "PW2-D"}
+    assert [f.subject for f in health.check_inputs_present(load_site(), present)] == ["PW2-B"]
     assert health.check_grid({"grid_status": "DOWN", "battery_percent": 64.0})[0].kind == "grid_down"
     assert health.check_grid({"grid_status": "UP", "battery_percent": 64.0}) == []
     assert health.check_collector(NOW - 600, NOW - 3600, NOW)[0].kind == "collector_stale"
