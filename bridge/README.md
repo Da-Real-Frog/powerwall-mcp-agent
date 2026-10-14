@@ -143,29 +143,50 @@ switch the Pi is on hands out a different range from percula's, say so in the pr
 
 ## 9. Point percula at it
 
-On percula, remove the earlier attempts first, then add the route permanently. `<pi-ip>` is
-the reserved address from step 8.
+On percula, remove the earlier attempts first. Then find which of percula's connections is on
+the Pi's network: `ip route get <pi-ip>` names the device (`dev …`), and the connection list
+maps devices to connection names. percula has a VLAN for the IoT network, so this may not be
+its main wired connection. `<pi-ip>` is the reserved address from step 8.
 
 ```
 sudo ip route del 192.168.91.1 2>/dev/null
 nmcli connection show | grep TEG
+ip route get <pi-ip>
 nmcli -t -f NAME,DEVICE connection show --active
-sudo nmcli connection modify "<percula-home-connection>" +ipv4.routes "192.168.91.1/32 <pi-ip>"
-sudo nmcli connection up "<percula-home-connection>"
+```
+
+If the second line lists a TEG connection from the USB adapter test, delete it with
+`sudo nmcli connection delete <its-name>`. `ip route get <pi-ip>` should show only a `dev`, no
+`via`; if it shows a `via`, the Pi is on a different network from percula. Take the
+connection name (before the colon) whose device matches, and add the route to it:
+
+```
+sudo nmcli connection modify "<connection-name>" +ipv4.routes "192.168.91.1/32 <pi-ip>"
+sudo nmcli connection up "<connection-name>"
 ip route get 192.168.91.1
 curl -sk -m 5 -o /dev/null -w '%{http_code}\n' https://192.168.91.1/
 ```
 
-If the second line lists a TEG connection from the USB adapter test, delete it with
-`sudo nmcli connection delete <its-name>` so percula doesn't try its own weak Wi-Fi path.
-`<percula-home-connection>` is the active connection on percula's wired port from the third
-line. `ip route get` should say `via <pi-ip>`, and curl should print a 3-digit code. If
-percula's network isn't run by NetworkManager (the third line prints nothing), use
-`sudo ip route replace 192.168.91.1 via <pi-ip>` for now and ask in the project thread for the
-netplan version.
+`ip route get` should say `via <pi-ip>` on that device, and curl should print `200`. If curl
+prints `000`, `sudo iptables -L TEG_BRIDGE -v -n` on the Pi shows whether percula's packets
+reach it at all.
 
-Once curl answers, re-run the `PW_GW_PWD` test from the project thread. Seeing inputs A1 to D1
-alongside A to D means TEDAPI works.
+## 10. Check that TEDAPI answers
+
+With `PW_GW_PWD=<label password>` in percula's `mcp-server.env`, this logs in to the gateway's
+local API through the bridge and prints the per-string readings of both Powerwall+ inverters:
+
+```
+docker run --rm --env-file /home/nicolaskeller/mcp-server.env powerwall-mcp-server uv run --no-sync python -c "
+import os, json
+from pypowerwall.tedapi import TEDAPI
+t = TEDAPI(os.environ['PW_GW_PWD'])
+print('logged in:', bool(t.get_din()))
+v = t.vitals() or {}
+print(json.dumps({k: v[k] for k in v if k.startswith(('PVAC', 'PVS'))}, indent=1))"
+```
+
+`logged in: True` and two `PVAC--…` entries mean the bridge is done.
 
 ## Living in the garage
 
