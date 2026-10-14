@@ -9,7 +9,10 @@ def test_repo_site_file_matches_permit_plans():
     assert sum(a.kwp for a in site.arrays) == pytest.approx(12.8)
     assert len(site.inputs) == 6
     assert sum(i.strings for i in site.inputs) == 6
-    assert {i.key: i.panels_per_string for i in site.inputs if i.key} == {"PW2-A": 6, "PW2-B": 6, "PW2-D": 4}
+    assert {i.key: (i.array, i.panels_per_string) for i in site.inputs} == {
+        "PW1-B": ("MP1", 6), "PW1-C": ("MP1", 7), "PW1-D": ("MP2", 3),
+        "PW2-A": ("MP3", 6), "PW2-B": ("MP3", 6), "PW2-D": ("MP3", 4),
+    }
     assert site.unused_inputs == {"PW1-A", "PW2-C"}
     assert site.inverters == {"E005VD": 2, "H000RA": 1} and site.local_api_powerwall == 2
 
