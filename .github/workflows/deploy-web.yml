@@ -1,0 +1,35 @@
+name: Deploy Home Chat
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'web/**'
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Check the env file
+        run: |
+          if [ ! -f /home/nicolaskeller/home-chat.env ]; then
+            echo "::error::Create /home/nicolaskeller/home-chat.env on percula with ANTHROPIC_API_KEY (see web/README.md)"
+            exit 1
+          fi
+
+      - name: Build and Run Docker Container
+        run: |
+          docker build -t powerwall-home-chat ./web
+          docker stop home-chat || true
+          docker rm home-chat || true
+          docker run -d \
+            --name home-chat \
+            --env-file /home/nicolaskeller/home-chat.env \
+            -e MCP_SERVER_URL=http://host.docker.internal:8000/mcp \
+            --add-host=host.docker.internal:host-gateway \
+            --restart unless-stopped \
+            -p 8080:8080 \
+            powerwall-home-chat
