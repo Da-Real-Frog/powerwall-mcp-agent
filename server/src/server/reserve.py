@@ -19,6 +19,8 @@ SEVERE_EVENTS = (
     "Tornado", "Severe Thunderstorm", "Hurricane", "Tropical Storm", "Winter Storm", "Ice Storm", "Blizzard",
     "Extreme Cold", "Extreme Heat", "Excessive Heat", "High Wind",
 )
+# Advisories that count as a watch: a Wind Advisory is what usually sits behind a CPS Energy high wind alert
+WATCH_ADVISORIES = ("Wind Advisory",)
 DAY_START_HOUR = 7  # "daytime use" is home use from 07:00 to 19:00 local time
 DAY_END_HOUR = 19
 HISTORY_DAYS = 14
@@ -73,7 +75,7 @@ def decide(inputs: Inputs, settings: ReserveSettings) -> Decision:
 
 
 def classify_alerts(alerts: list[dict], hold_until: dict[str, int], now: int, hold_hours: float):
-    """Splits NWS alerts into severe warnings and watches.
+    """Splits NWS alerts into severe warnings and watches (a Wind Advisory counts as a watch).
 
     A warning keeps counting for `hold_hours` after it ends: `hold_until` maps each warning event to the
     time its hold runs out, and is updated in place so the hold survives the alert leaving the feed.
@@ -81,6 +83,9 @@ def classify_alerts(alerts: list[dict], hold_until: dict[str, int], now: int, ho
     warnings, watches = set(), set()
     for a in alerts:
         event = a.get("event") or ""
+        if event in WATCH_ADVISORIES:
+            watches.add(event)
+            continue
         if not any(event.startswith(name) for name in SEVERE_EVENTS):
             continue
         if event.endswith("Warning"):

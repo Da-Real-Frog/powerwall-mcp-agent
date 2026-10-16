@@ -22,7 +22,7 @@ Every 15 minutes the collector picks a backup reserve with ordered rules; the fi
 | --- | --- | --- |
 | 1 | Grid is down | Unchanged |
 | 2 | Severe NWS warning (tornado, severe thunderstorm, hurricane, tropical storm, winter storm, ice storm, blizzard, extreme cold or heat, high wind), held 6 hours after it ends | 100% |
-| 3 | Severe NWS watch for the same events | 80% |
+| 3 | Severe NWS watch for the same events, or a Wind Advisory (what usually sits behind a CPS Energy high wind alert) | 80% |
 | 4 | Tomorrow's solar forecast is below daytime home use | 60% |
 | 5 | Tomorrow's solar covers daytime use but not a full recharge (27 kWh) | 40% |
 | 6 | Otherwise | 20% |

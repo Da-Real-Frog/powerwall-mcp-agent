@@ -47,6 +47,11 @@ def test_only_severe_events_count_and_warnings_are_held():
     assert hold == {}
 
 
+def test_wind_advisory_counts_as_a_watch():
+    alerts = [{"event": "Wind Advisory"}, {"event": "Lake Wind Advisory"}]
+    assert reserve.classify_alerts(alerts, {}, NOW, 6) == ([], ["Wind Advisory"])
+
+
 class Recorder:
     def __init__(self):
         self.calls = []
