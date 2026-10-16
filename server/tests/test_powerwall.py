@@ -1,7 +1,8 @@
 import pytest
 
+from server import powerwall
 from server.config import load_site
-from server.powerwall import PowerwallError, read_status, strings_from_vitals
+from server.powerwall import PowerwallError, read_status, read_strings, strings_from_vitals
 
 
 class FakePowerwall:
@@ -56,3 +57,67 @@ def test_strings_from_vitals_are_named_per_powerwall():
         "PW1-B": {"Power": 300.0},
         "ZZZZZZ-D": {"Power": 5.0},  # an inverter missing from site.toml keeps its serial suffix
     }
+
+
+class FakeTEDAPI:
+    def __init__(self, results):
+        self.results = results  # one entry per vitals() call: a dict, None, or an exception to raise
+        self.calls = 0
+
+    def vitals(self):
+        result = self.results[self.calls]
+        self.calls += 1
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+
+@pytest.fixture
+def tedapi(monkeypatch):
+    clock = {"now": 1000.0}
+    monkeypatch.setenv("PW_GW_PWD", "x")
+    monkeypatch.setattr(powerwall.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(powerwall, "_tedapi_failures", 0)
+    monkeypatch.setattr(powerwall, "_tedapi_retry_at", 0.0)
+
+    def install(results):
+        fake = FakeTEDAPI(results)
+        monkeypatch.setattr(powerwall, "get_tedapi", lambda: fake)
+        return fake
+
+    return install, clock
+
+
+def test_tedapi_failures_back_off_then_reset(tedapi):
+    install, clock = tedapi
+    site = load_site()
+    good = {"PVAC--1538000-25-F--TG12xxxxH000RA": {"PVAC_PVMeasuredPower_B": 300.0}}
+    fake = install([TimeoutError("timed out"), None, good])
+
+    with pytest.raises(TimeoutError):
+        read_strings(None, site)
+    clock["now"] += 30  # the next poll is inside the one-minute wait, so the gateway is left alone
+    with pytest.raises(PowerwallError, match="next try in 31s"):
+        read_strings(None, site)
+    assert fake.calls == 1
+
+    clock["now"] += 31
+    with pytest.raises(PowerwallError, match="no vitals"):
+        read_strings(None, site)
+    assert fake.calls == 2
+    clock["now"] += 119  # the second failure waits two minutes
+    with pytest.raises(PowerwallError, match="next try"):
+        read_strings(None, site)
+
+    clock["now"] += 1
+    assert read_strings(None, site) == {"PW1-B": {"Power": 300.0}}
+    assert powerwall._tedapi_failures == 0
+
+
+def test_tedapi_backoff_is_capped(tedapi, monkeypatch):
+    install, clock = tedapi
+    install([TimeoutError("timed out")])
+    monkeypatch.setattr(powerwall, "_tedapi_failures", 10)
+    with pytest.raises(TimeoutError):
+        read_strings(None, load_site())
+    assert powerwall._tedapi_retry_at == clock["now"] + powerwall.TEDAPI_BACKOFF_MAX
