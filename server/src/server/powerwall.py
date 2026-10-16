@@ -1,6 +1,7 @@
 """One shared, lazily created connection to the local Powerwall gateway."""
 import os
 import threading
+import time
 
 import pypowerwall
 from pypowerwall.tedapi import TEDAPI
@@ -10,6 +11,11 @@ from .config import Site, require_env, timezone
 _lock = threading.Lock()
 _pw: pypowerwall.Powerwall | None = None
 _tedapi: TEDAPI | None = None
+_tedapi_failures = 0
+_tedapi_retry_at = 0.0  # time.monotonic() before which TEDAPI is left alone
+
+TEDAPI_BACKOFF_FIRST = 60  # seconds to wait after the first failure; doubles on each failure after that
+TEDAPI_BACKOFF_MAX = 300  # the longest wait, kept within health.STALE_SECONDS so a short outage clears quickly
 
 
 class PowerwallError(Exception):
@@ -109,16 +115,33 @@ def strings_from_vitals(vitals: dict, site: Site) -> dict:
     return result
 
 
+def _tedapi_failed() -> None:
+    """Drops the session and waits longer before the next login, so a struggling gateway isn't hit every poll."""
+    global _tedapi_failures, _tedapi_retry_at
+    reset_tedapi()
+    _tedapi_failures += 1
+    delay = min(TEDAPI_BACKOFF_FIRST * 2 ** (_tedapi_failures - 1), TEDAPI_BACKOFF_MAX)
+    _tedapi_retry_at = time.monotonic() + delay
+
+
 def read_strings(pw, site: Site) -> dict:
-    """Every input's readings: over TEDAPI when PW_GW_PWD is set, else the local API's single inverter."""
+    """Every input's readings: over TEDAPI when PW_GW_PWD is set, else the local API's single inverter.
+
+    After a TEDAPI failure it skips TEDAPI for 1, 2, 4, then at most 5 minutes, raising without contacting it.
+    """
+    global _tedapi_failures
     if tedapi_enabled():
+        wait = _tedapi_retry_at - time.monotonic()
+        if wait > 0:
+            raise PowerwallError(f"TEDAPI failed {_tedapi_failures} time(s); next try in {int(wait) + 1}s")
         try:
             vitals = get_tedapi().vitals()
         except Exception:
-            reset_tedapi()
+            _tedapi_failed()
             raise
         if not vitals:
-            reset_tedapi()
+            _tedapi_failed()
             raise PowerwallError("TEDAPI returned no vitals")
+        _tedapi_failures = 0
         return strings_from_vitals(vitals, site)
     return {f"PW{site.local_api_powerwall}-{name}": values for name, values in (pw.strings() or {}).items()}
