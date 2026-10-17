@@ -162,3 +162,59 @@ def test_home_use_from_two_weeks_of_history(tmp_path):
 
 def test_site_toml_reserve_settings():
     assert load_site().reserve == ReserveSettings()
+
+
+def test_winter_advisories_count_as_watches_but_heat_and_fog_do_not():
+    alerts = [{"event": "Winter Weather Advisory"}, {"event": "Heat Advisory"}, {"event": "Dense Fog Advisory"}]
+    assert reserve.classify_alerts(alerts, {}, NOW, 6) == ([], ["Winter Weather Advisory"])
+
+
+@pytest.mark.parametrize("rain, solar, rule, target", [
+    (30.0, 60.0, 7, 40),   # sunny tomorrow, but rain likely
+    (20.0, 60.0, 6, 20),   # 20% is not over the threshold
+    (None, 60.0, 6, 20),
+    (90.0, 10.0, 4, 60),   # low solar already asks for more than the rain rule
+    (90.0, 30.0, 5, 40),   # same level: the solar rule stands
+])
+def test_rain_raises_the_reserve_to_at_least_40(rain, solar, rule, target):
+    decision = decide(inputs(rain_chance=rain, tomorrow_solar_kwh=solar), S)
+    assert (decision.rule, decision.target) == (rule, target)
+
+
+class FakePw:
+    def get_reserve(self, scale=True):
+        return 20.0
+
+
+def run_gather(store, grid=None, alerts=(), now=NOW):
+    def get_grid():
+        if isinstance(grid, Exception):
+            raise grid
+        return grid or {"state": "normal", "title": "Normal Conditions", "reserves_mw": 8000.0}
+    return reserve.gather(FakePw, store, S, lambda: list(alerts), lambda: {"daily_kwh": {}}, now, TZ,
+                          get_grid=get_grid, get_rain=lambda: 10.0)
+
+
+def test_ercot_emergency_is_a_warning_and_is_held(tmp_path):
+    store = Store(tmp_path / "pw.db")
+    eea = {"state": "eea1", "title": "Energy Emergency Level 1", "reserves_mw": 2300.0}
+    got = run_gather(store, eea)
+    assert got.warnings == ["ERCOT Energy Emergency Level 1"] and got.rain_chance == 10.0
+    assert decide(got, S).target == 100
+    # Back to normal, still held for warning_hold_hours
+    assert run_gather(store, now=NOW + 5 * 3600).warnings == ["ERCOT Energy Emergency Level 1"]
+    assert run_gather(store, now=NOW + 6 * 3600 + 1).warnings == []
+
+
+def test_ercot_conservation_and_low_reserves_are_watches(tmp_path):
+    store = Store(tmp_path / "pw.db")
+    appeal = run_gather(store, {"state": "conservation", "title": "Conservation Appeal", "reserves_mw": 3500.0})
+    assert appeal.watches == ["ERCOT Conservation Appeal (3,500 MW reserves)"] and appeal.warnings == []
+    low = run_gather(store, {"state": "normal", "title": "Normal Conditions", "reserves_mw": 2900.0})
+    assert low.watches == ["ERCOT Normal Conditions (2,900 MW reserves)"]
+    assert run_gather(store).watches == [] and run_gather(store).warnings == []
+
+
+def test_ercot_unreachable_changes_nothing(tmp_path):
+    got = run_gather(Store(tmp_path / "pw.db"), RuntimeError("403 Forbidden"))
+    assert got.errors == ["ERCOT grid conditions: 403 Forbidden"] and decide(got, S).target is None

@@ -4,7 +4,7 @@ import os
 import threading
 import time
 
-from . import forecast, health, powerwall, reserve, weather
+from . import ercot, forecast, health, powerwall, reserve, weather
 from .config import Site, load_site, location, timezone
 from .storage import BUCKET, Store
 
@@ -146,4 +146,9 @@ def gather_reserve_inputs(store: Store, settings, now: int) -> reserve.Inputs:
         lat, lon = location()
         return forecast.get_forecast(load_site(), lat, lon, tz)
 
-    return reserve.gather(powerwall.get_connection, store, settings, alerts, solar, now, tz)
+    def rain():
+        lat, lon = location()
+        return forecast.get_rain_chance(lat, lon, tz)
+
+    return reserve.gather(powerwall.get_connection, store, settings, alerts, solar, now, tz,
+                          get_grid=ercot.get_condition, get_rain=rain)

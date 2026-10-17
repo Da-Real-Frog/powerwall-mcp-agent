@@ -21,13 +21,16 @@ Every 15 minutes the collector picks a backup reserve with ordered rules; the fi
 | Rule | Condition | Reserve |
 | --- | --- | --- |
 | 1 | Grid is down | Unchanged |
-| 2 | Severe NWS warning (tornado, severe thunderstorm, hurricane, tropical storm, winter storm, ice storm, blizzard, extreme cold or heat, high wind), held 6 hours after it ends | 100% |
-| 3 | Severe NWS watch for the same events, or a Wind Advisory (what usually sits behind a CPS Energy high wind alert) | 80% |
+| 2 | Severe NWS warning (tornado, severe thunderstorm, hurricane, tropical storm, winter storm, ice storm, blizzard, extreme cold or heat, high wind), or an ERCOT Energy Emergency Alert (grid reserves below 2,500 MW), held 6 hours after it ends | 100% |
+| 3 | Severe NWS watch for the same events; a Wind Advisory (what usually sits behind a CPS Energy high wind alert), Winter Weather or Freezing Rain Advisory; or ERCOT grid conditions that are not normal (a conservation appeal, or reserves below 3,000 MW) | 80% |
 | 4 | Tomorrow's solar forecast is below daytime home use | 60% |
 | 5 | Tomorrow's solar covers daytime use but not a full recharge (27 kWh) | 40% |
 | 6 | Otherwise | 20% |
+| 7 | Rules 5 or 6 matched, but the chance of rain is over 20% in any of the next 24 hours: at least | 40% |
 
-If the NWS alerts or the forecast can't be fetched, nothing changes. Daytime use (07:00 to 19:00) is the median of the last 14 days once the collector has them, and the estimate in `site.toml` until then. Safeguards: changes of under 5 points are skipped, at most one change per hour, and a change made in the Tesla app pauses the controller for 24 hours.
+Other advisories (heat, fog, air quality) don't count: they rarely mean an outage. ERCOT's state comes from the public dashboard behind its [Grid Conditions](https://www.ercot.com/gridmktinfo/dashboards/gridconditions) page; ERCOT has no feed for its TXANS notices, so a Weather Watch days ahead only shows up once reserves tighten.
+
+If the NWS alerts, ERCOT's grid conditions or the forecasts can't be fetched, nothing changes. Daytime use (07:00 to 19:00) is the median of the last 14 days once the collector has them, and the estimate in `site.toml` until then. Safeguards: changes of under 5 points are skipped, at most one change per hour, and a change made in the Tesla app pauses the controller for 24 hours.
 
 `RESERVE_MODE` is `dry-run` by default: decisions are recorded and announced on ntfy ("Would set reserve to 100%") but nothing is written. With `RESERVE_MODE=live` it writes through the local gateway and falls back to Tesla's cloud if the gateway refuses. The cloud fallback needs a one-time Tesla sign-in saved in `PW_CACHE_DIR`; without it, a refused local write is recorded as failed.
 
@@ -71,10 +74,11 @@ uv run server
 ```
 The client then connects with `MCP_SERVER_URL=http://localhost:8000/mcp`.
 
-Two scripts check each data source without starting the server:
+These scripts check each data source without starting the server:
 ```bash
 uv run scripts/check_powerwall.py   # Powerwall connection and live readings
 uv run scripts/check_forecast.py    # Per-array and total solar forecast
+uv run scripts/check_ercot.py       # ERCOT grid condition and how the controller reads it
 ```
 
 ## Tests

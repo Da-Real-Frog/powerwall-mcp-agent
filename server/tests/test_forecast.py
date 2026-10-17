@@ -56,3 +56,14 @@ def test_mismatched_time_axes_are_rejected():
     per_array["MP3"] = (times[1:], gti[1:])
     with pytest.raises(ValueError, match="MP3"):
         build_forecast(site, per_array, datetime(2026, 10, 10, 0, 0))
+
+
+def test_rain_chance_looks_at_the_next_24_hours():
+    from datetime import datetime
+
+    from server.forecast import rain_chance
+    times = [f"2026-10-17T{h:02d}:00" for h in range(24)] + [f"2026-10-18T{h:02d}:00" for h in range(24)]
+    chances = [80] * 10 + [5] * 33 + [None] + [90] * 4
+    # From 10:00 the past 80% is ignored and the 90% from 20:00 tomorrow is beyond 24 hours
+    assert rain_chance(times, chances, datetime(2026, 10, 17, 10, 30)) == 5
+    assert rain_chance(times, chances, datetime(2026, 10, 17, 9, 0)) == 80

@@ -47,6 +47,8 @@ class ReserveSettings:
     low_solar: float = 60
     partial: float = 40
     default: float = 20
+    rain: float = 40  # rule 7: the least reserve when rain is likely
+    rain_chance: float = 20  # % chance of rain in any of the next 24 hours above which rule 7 applies
     warning_hold_hours: float = 6
     battery_kwh: float = 27
     daytime_use_kwh: float = 15  # used until 14 days of history exist
@@ -108,7 +110,7 @@ def load_site(path: str | Path | None = None) -> Site:
         reserve = ReserveSettings(**{k: float(v) for k, v in raw.get("reserve", {}).items()})
     except (KeyError, TypeError, ValueError) as e:
         raise ConfigError(f"Site file {path} is missing or has an invalid field: {e}") from e
-    for name in ("warning", "watch", "low_solar", "partial", "default"):
+    for name in ("warning", "watch", "low_solar", "partial", "default", "rain", "rain_chance"):
         if not 0 <= getattr(reserve, name) <= 100:
             raise ConfigError(f"reserve.{name} must be between 0 and 100")
 

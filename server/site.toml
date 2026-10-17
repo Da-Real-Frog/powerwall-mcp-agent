@@ -98,11 +98,13 @@ strings = 1
 # Backup reserve controller. Reserve percentages are on the Tesla app's scale. Starting values
 # to tune, not recommendations from data. The rules are listed in the README.
 [reserve]
-warning = 100            # rule 2: severe NWS warning, held warning_hold_hours after it ends
-watch = 80               # rule 3: severe NWS watch
+warning = 100            # rule 2: severe NWS warning or ERCOT energy emergency, held warning_hold_hours after it ends
+watch = 80               # rule 3: severe NWS watch, winter or wind advisory, or tight ERCOT grid
 low_solar = 60           # rule 4: tomorrow's solar below daytime use
 partial = 40             # rule 5: solar covers daytime use but not a full recharge
 default = 20             # rule 6: otherwise
+rain = 40                # rule 7: at least this when rain is likely
+rain_chance = 20         # % chance of rain in any of the next 24 hours above which rule 7 applies
 warning_hold_hours = 6
 battery_kwh = 27         # two Powerwall+ units
 daytime_use_kwh = 15     # estimates, replaced by measured medians after 14 days of history

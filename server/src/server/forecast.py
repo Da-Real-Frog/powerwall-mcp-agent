@@ -80,3 +80,22 @@ def build_forecast(site: Site, per_array: dict[str, tuple[list[str], list[float 
 def get_forecast(site: Site, lat: float, lon: float, tz: str) -> dict:
     per_array = {a.name: fetch_gti(lat, lon, a.tilt, a.open_meteo_azimuth, tz) for a in site.arrays}
     return build_forecast(site, per_array, datetime.now(ZoneInfo(tz)))
+
+
+def rain_chance(times: list[str], chances: list[float | None], now: datetime, hours: int = 24) -> float:
+    """Highest hourly chance of rain (%) over the next `hours`, starting at the current hour."""
+    current_hour = now.strftime("%Y-%m-%dT%H:00")
+    upcoming = [c or 0 for t, c in zip(times, chances, strict=True) if t >= current_hour][:hours]
+    return max(upcoming, default=0)
+
+
+def get_rain_chance(lat: float, lon: float, tz: str) -> float:
+    response = httpx.get(
+        OPEN_METEO_URL,
+        params={"latitude": lat, "longitude": lon, "hourly": "precipitation_probability", "timezone": tz,
+                "forecast_days": 2},
+        timeout=10.0,
+    )
+    response.raise_for_status()
+    hourly = response.json()["hourly"]
+    return rain_chance(hourly["time"], hourly["precipitation_probability"], datetime.now(ZoneInfo(tz)))
