@@ -8,6 +8,7 @@ An AI workflow lab integrating Model Context Protocol (MCP), local Tesla Powerwa
 - `server/`: Python FastMCP server exposing the Powerwall status, the 3-array solar forecast and active weather alerts as MCP tools over streamable HTTP. See [server/README.md](server/README.md).
 - `client/`: `chat.py`, an interactive terminal chat for asking Claude questions through the server's tools, and an agent client that discovers those tools, calls them, and recommends a backup reserve for the night. The LLM provider (Gemini or Claude) is selected in its `.env` file. See [client/README.md](client/README.md).
 - `web/`: Home Chat, a chat page for phones on the home Wi-Fi. It runs on percula, keeps the Claude API key there, and on an iPhone is added to the Home Screen like an app. See [web/README.md](web/README.md).
+- `ios/`: Home Energy, a native iPhone app for the same chat, built in Xcode. See [ios/README.md](ios/README.md).
 - `bridge/`: Setting up a Raspberry Pi in the garage as a bridge so the server can reach the gateway's local API over its TEG Wi-Fi. See [bridge/README.md](bridge/README.md).
 - `server/site.toml`: The physical layout (arrays, panels, strings and Powerwall+ inputs) from the Tesla permit plans.
 - `.github/workflows/ci.yml`: Lint, unit tests and a secret scan on every pull request, on GitHub-hosted runners.
