@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        project: [ server, client ]
+        project: [ server, client, web ]
     defaults:
       run:
         working-directory: ${{ matrix.project }}

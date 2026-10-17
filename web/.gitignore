@@ -1,0 +1,10 @@
+# Environment variables and secrets
+.env
+**/.env
+
+# Python virtual environments and caches
+.venv/
+**/__pycache__/
+*.pyc
+#Mac internals
+.DS_Store

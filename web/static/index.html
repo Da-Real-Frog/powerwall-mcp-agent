@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Home Energy</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Home Energy">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#f6f4ef" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1b1d21" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="/static/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/static/icon-180.png">
+<link rel="icon" href="/static/icon-180.png">
+<style>
+  :root {
+    --bg: #f6f4ef; --panel: #ffffff; --text: #1d1f23; --muted: #6b6f76; --line: #e3e0d8;
+    --accent: #e08a1e; --accent-text: #ffffff; --mine: #2f6fde; --mine-text: #ffffff; --error: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1b1d21; --panel: #26292e; --text: #eceef1; --muted: #9aa0a8; --line: #34383e;
+      --accent: #f0a23b; --accent-text: #1b1d21; --mine: #3d7cf0; --mine-text: #ffffff; --error: #f2817a;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 17px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    display: flex; flex-direction: column;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 16px; border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 19px; margin: 0; font-weight: 650; }
+  header button {
+    border: 0; background: none; color: var(--mine); font: inherit; font-size: 16px; padding: 6px 0;
+  }
+  #log { flex: 1; overflow-y: auto; padding: 16px; -webkit-overflow-scrolling: touch; }
+  .msg { max-width: 88%; margin: 0 0 12px; padding: 10px 14px; border-radius: 18px; overflow-wrap: anywhere; }
+  .msg p { margin: 0 0 8px; } .msg p:last-child { margin: 0; }
+  .msg ul { margin: 4px 0 8px; padding-left: 20px; } .msg ul:last-child { margin-bottom: 0; }
+  .user { margin-left: auto; background: var(--mine); color: var(--mine-text); border-bottom-right-radius: 6px; }
+  .assistant { background: var(--panel); border: 1px solid var(--line); border-bottom-left-radius: 6px; }
+  .status { color: var(--muted); font-size: 15px; font-style: italic; }
+  .error { color: var(--error); font-size: 15px; margin-top: 6px; }
+  #welcome { color: var(--muted); text-align: center; margin: 24px 8px; }
+  #welcome h2 { color: var(--text); font-size: 22px; margin: 0 0 6px; }
+  #chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 18px; }
+  #chips button {
+    border: 1px solid var(--line); background: var(--panel); color: var(--text);
+    font: inherit; font-size: 15px; padding: 8px 14px; border-radius: 999px;
+  }
+  form {
+    display: flex; gap: 8px; align-items: flex-end; padding: 10px 12px;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--line); background: var(--bg);
+  }
+  textarea {
+    flex: 1; resize: none; max-height: 140px; min-height: 44px;
+    font: inherit; font-size: 17px; color: var(--text); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 22px; padding: 10px 16px; outline: none;
+  }
+  #send {
+    width: 44px; height: 44px; flex: none; border: 0; border-radius: 50%;
+    background: var(--accent); color: var(--accent-text); font-size: 20px; font-weight: 700;
+  }
+  #send:disabled { opacity: .4; }
+</style>
+</head>
+<body>
+<header>
+  <h1>☀️ Home Energy</h1>
+  <button id="new" type="button">New chat</button>
+</header>
+<main id="log">
+  <div id="welcome">
+    <h2>Hi! Ask me about the house's power.</h2>
+    <div>The batteries, the solar panels, the weather or the grid. Just type a question.</div>
+    <div id="chips">
+      <button type="button">How full are the batteries?</button>
+      <button type="button">How much sun did we get today?</button>
+      <button type="button">Is everything working OK?</button>
+      <button type="button">Are we ready if the power goes out?</button>
+    </div>
+  </div>
+</main>
+<form id="ask">
+  <textarea id="q" rows="1" placeholder="Ask a question…" enterkeyhint="send" autocomplete="off"></textarea>
+  <button id="send" type="submit" aria-label="Send">↑</button>
+</form>
+<script>
+"use strict";
+const STORE = "home-energy-chat";
+const log = document.getElementById("log");
+const welcome = document.getElementById("welcome");
+const form = document.getElementById("ask");
+const input = document.getElementById("q");
+const send = document.getElementById("send");
+let messages = [];
+let busy = false;
+
+function load() {
+  try { messages = JSON.parse(localStorage.getItem(STORE)) || []; } catch { messages = []; }
+}
+function save() {
+  try { localStorage.setItem(STORE, JSON.stringify(messages.slice(-40))); } catch { /* private mode */ }
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+}
+// Just enough Markdown for the answers: paragraphs, "- " bullets and **bold**. Escaped first, so it is safe.
+function render(text) {
+  const inline = s => escapeHtml(s).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  let html = "", list = false;
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    const bullet = line.match(/^[-*•]\s+(.*)/);
+    if (bullet) {
+      if (!list) { html += "<ul>"; list = true; }
+      html += "<li>" + inline(bullet[1]) + "</li>";
+      continue;
+    }
+    if (list) { html += "</ul>"; list = false; }
+    if (line) html += "<p>" + inline(line.replace(/^#+\s*/, "")) + "</p>";
+  }
+  return html + (list ? "</ul>" : "");
+}
+
+function bubble(role, text) {
+  const div = document.createElement("div");
+  div.className = "msg " + role;
+  if (role === "user") div.textContent = text; else div.innerHTML = render(text);
+  log.appendChild(div);
+  return div;
+}
+function scrollDown() { log.scrollTop = log.scrollHeight; }
+
+function show() {
+  log.querySelectorAll(".msg").forEach(el => el.remove());
+  welcome.hidden = messages.length > 0;
+  for (const m of messages) bubble(m.role, m.content);
+  scrollDown();
+}
+
+async function ask(question) {
+  if (busy || !question.trim()) return;
+  busy = true; send.disabled = true;
+  welcome.hidden = true;
+  messages.push({role: "user", content: question.trim()});
+  bubble("user", question.trim());
+  const out = bubble("assistant", "");
+  const status = document.createElement("div");
+  status.className = "status"; status.textContent = "Thinking…";
+  out.appendChild(status);
+  scrollDown();
+
+  let text = "", failed = "";
+  const paint = () => { out.innerHTML = render(text); if (status.textContent) out.appendChild(status); scrollDown(); };
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({messages}),
+    });
+    if (!res.ok || !res.body) throw new Error("status " + res.status);
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const {value, done} = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, {stream: true});
+      let nl;
+      while ((nl = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, nl); buffer = buffer.slice(nl + 1);
+        if (!line.trim()) continue;
+        const ev = JSON.parse(line);
+        if (ev.type === "text") { text += ev.text; status.textContent = ""; }
+        else if (ev.type === "status") { if (text && !text.endsWith("\n")) text += "\n\n"; status.textContent = ev.text; }
+        else if (ev.type === "error") failed = ev.text;
+        paint();
+      }
+    }
+  } catch (e) {
+    failed = "I couldn't reach the house's assistant. Are you on the home Wi-Fi?";
+  }
+  status.textContent = "";
+  paint();
+  if (failed) {
+    const err = document.createElement("div");
+    err.className = "error"; err.textContent = failed;
+    out.appendChild(err);
+  }
+  if (text.trim()) messages.push({role: "assistant", content: text.trim()});
+  save();
+  scrollDown();
+  busy = false; send.disabled = false;
+}
+
+form.addEventListener("submit", e => {
+  e.preventDefault();
+  const q = input.value;
+  input.value = ""; input.style.height = "";
+  ask(q);
+});
+input.addEventListener("keydown", e => {
+  // Enter sends on a keyboard; on the iPhone the return key also sends (enterkeyhint)
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
+});
+input.addEventListener("input", () => {
+  input.style.height = ""; input.style.height = Math.min(input.scrollHeight, 140) + "px";
+});
+document.getElementById("chips").addEventListener("click", e => {
+  if (e.target.tagName === "BUTTON") ask(e.target.textContent);
+});
+document.getElementById("new").addEventListener("click", () => {
+  if (busy) return;
+  messages = []; save(); show(); input.focus();
+});
+
+load();
+show();
+</script>
+</body>
+</html>
