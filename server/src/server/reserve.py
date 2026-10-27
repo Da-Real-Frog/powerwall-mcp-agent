@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from . import ercot
 from .config import ReserveSettings
 from .storage import BUCKET, Store
 
@@ -19,8 +20,9 @@ SEVERE_EVENTS = (
     "Tornado", "Severe Thunderstorm", "Hurricane", "Tropical Storm", "Winter Storm", "Ice Storm", "Blizzard",
     "Extreme Cold", "Extreme Heat", "Excessive Heat", "High Wind",
 )
-# Advisories that count as a watch: a Wind Advisory is what usually sits behind a CPS Energy high wind alert
-WATCH_ADVISORIES = ("Wind Advisory",)
+# Advisories that count as a watch: a Wind Advisory is what usually sits behind a CPS Energy high wind alert,
+# and ice on lines is what brings San Antonio's power down in winter. Heat, fog and air quality ones don't count.
+WATCH_ADVISORIES = ("Wind Advisory", "Winter Weather Advisory", "Freezing Rain Advisory")
 DAY_START_HOUR = 7  # "daytime use" is home use from 07:00 to 19:00 local time
 DAY_END_HOUR = 19
 HISTORY_DAYS = 14
@@ -32,8 +34,10 @@ class Inputs:
     """Everything a decision depends on, so each one can be explained and replayed."""
     grid_status: str | None
     current_reserve: float | None
-    warnings: list[str] = field(default_factory=list)  # severe NWS warnings in effect or within the hold
-    watches: list[str] = field(default_factory=list)
+    # Severe NWS warnings and ERCOT emergencies in effect or within the hold
+    warnings: list[str] = field(default_factory=list)
+    watches: list[str] = field(default_factory=list)  # severe NWS watches and tight ERCOT conditions
+    rain_chance: float | None = None  # highest hourly chance of rain (%) in the next 24 hours
     tomorrow_solar_kwh: float | None = None
     daytime_use_kwh: float = 0.0
     overnight_use_kwh: float = 0.0
@@ -56,11 +60,21 @@ def decide(inputs: Inputs, settings: ReserveSettings) -> Decision:
         # Missing weather data could hide a storm, so never lower the reserve on partial information
         return Decision(0, None, f"Inputs unavailable ({'; '.join(inputs.errors)}), so no change")
     if inputs.warnings:
-        return Decision(2, settings.warning, f"Severe weather warning: {', '.join(inputs.warnings)}")
+        return Decision(2, settings.warning, f"Warning in effect: {', '.join(inputs.warnings)}")
     if inputs.watches:
-        return Decision(3, settings.watch, f"Severe weather watch: {', '.join(inputs.watches)}")
+        return Decision(3, settings.watch, f"Watch in effect: {', '.join(inputs.watches)}")
     if inputs.tomorrow_solar_kwh is None:
         return Decision(0, None, "No solar forecast for tomorrow, so no change")
+    decision = _solar_rule(inputs, settings)
+    rain = inputs.rain_chance
+    if rain is not None and rain > settings.rain_chance and decision.target < settings.rain:
+        return Decision(7, settings.rain, f"{rain:.0f}% chance of rain in the next 24 hours "
+                                          f"(over {settings.rain_chance:.0f}%), and {decision.reason[0].lower()}"
+                                          f"{decision.reason[1:]}")
+    return decision
+
+
+def _solar_rule(inputs: Inputs, settings: ReserveSettings) -> Decision:
     solar, day = inputs.tomorrow_solar_kwh, inputs.daytime_use_kwh
     if solar < day:
         return Decision(4, settings.low_solar,
@@ -216,9 +230,11 @@ class Controller:
         return {"action": "set", "note": f"Changing {current:.0f}% to {decision.target:.0f}%"}
 
 
-def gather(get_pw, store: Store, settings: ReserveSettings, get_alerts, get_forecast, now: int, tz: str) -> Inputs:
+def gather(get_pw, store: Store, settings: ReserveSettings, get_alerts, get_forecast, now: int, tz: str,
+           get_grid=None, get_rain=None) -> Inputs:
     """Collects the decision inputs. `get_pw()` returns the gateway connection; `get_alerts()` and
-    `get_forecast()` are the NWS and Open-Meteo calls."""
+    `get_forecast()` are the NWS and Open-Meteo calls, `get_grid()` ERCOT's grid condition and `get_rain()`
+    the chance of rain."""
     reading = store.latest_reading()
     inputs = Inputs(grid_status=reading["grid_status"] if reading else None, current_reserve=None,
                     daytime_use_kwh=settings.daytime_use_kwh, overnight_use_kwh=settings.overnight_use_kwh)
@@ -229,13 +245,30 @@ def gather(get_pw, store: Store, settings: ReserveSettings, get_alerts, get_fore
 
     state = store.reserve_state()
     hold = state.get("hold_until", {})
+    ercot_tight = None
+    if get_grid:
+        try:
+            emergency, ercot_tight = ercot.classify(get_grid())
+            if emergency:
+                # Held like a warning, so the battery stays full while the grid recovers
+                hold[emergency] = max(hold.get(emergency, 0), now + int(settings.warning_hold_hours * 3600))
+        except Exception as e:
+            inputs.errors.append(f"ERCOT grid conditions: {e}")
     try:
         inputs.warnings, inputs.watches = classify_alerts(get_alerts(), hold, now, settings.warning_hold_hours)
     except Exception as e:
         inputs.errors.append(f"NWS alerts: {e}")
         inputs.warnings = sorted(event for event, until in hold.items() if until > now)
+    if ercot_tight:
+        inputs.watches = sorted([*inputs.watches, ercot_tight])
     state["hold_until"] = hold
     store.save_reserve_state(state)
+
+    if get_rain:
+        try:
+            inputs.rain_chance = get_rain()
+        except Exception as e:
+            inputs.errors.append(f"rain forecast: {e}")
 
     try:
         inputs.tomorrow_solar_kwh = tomorrow_solar(get_forecast(), now, tz)
