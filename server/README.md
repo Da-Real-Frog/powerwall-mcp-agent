@@ -34,6 +34,8 @@ If the NWS alerts, ERCOT's grid conditions or the forecasts can't be fetched, no
 
 `RESERVE_MODE` is `dry-run` by default: decisions are recorded and announced on ntfy ("Would set reserve to 100%") but nothing is written. With `RESERVE_MODE=live` it writes through the local gateway and falls back to Tesla's cloud if the gateway refuses. The cloud fallback needs a one-time Tesla sign-in saved in `PW_CACHE_DIR`; without it, a refused local write is recorded as failed.
 
+Each change is announced on ntfy, at high priority (with sound) when it goes to the watch level or above. In live mode the message says how to override: change the reserve in the Tesla app, and the controller sends an "Override seen" notice and leaves it alone for 24 hours (`manual_pause_hours`). A failed write is announced at high priority. To get these on an iPhone or Mac, install the free ntfy app and subscribe to the same topic as `NTFY_URL`.
+
 ## Health checks and alerts
 Every five minutes the collector runs fixed rules over the readings, no LLM involved:
 - **String dead / low:** each mapped input is compared, in watts per panel averaged over 15 minutes, with the other inputs on the same array. Under 2 W per panel is dead; under half of the neighbours' median is low. No verdict while the neighbours make under 20 W per panel (night, heavy cloud).
