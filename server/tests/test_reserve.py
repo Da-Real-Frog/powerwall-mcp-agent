@@ -61,6 +61,7 @@ class Recorder:
 
     def send(self, title, message, priority="default", tags=""):
         self.calls.append(title)
+        self.sent = [*getattr(self, "sent", []), (title, message, priority)]
 
 
 def controller(tmp_path, live=False):
@@ -218,3 +219,31 @@ def test_ercot_conservation_and_low_reserves_are_watches(tmp_path):
 def test_ercot_unreachable_changes_nothing(tmp_path):
     got = run_gather(Store(tmp_path / "pw.db"), RuntimeError("403 Forbidden"))
     assert got.errors == ["ERCOT grid conditions: 403 Forbidden"] and decide(got, S).target is None
+
+
+def test_live_announcements_say_how_to_override_and_storms_are_high_priority(tmp_path):
+    c, _, notifier = controller(tmp_path, live=True)
+    c.step(inputs(watches=["Tornado Watch"]), NOW)
+    title, message, priority = notifier.sent[-1]
+    assert title == "Set reserve to 80%" and priority == "high"
+    assert "change the reserve in the Tesla app" in message and "24 hours" in message
+    c.step(inputs(current_reserve=80.0), NOW + 3600)  # back to sunny: 20%
+    assert notifier.sent[-1][0] == "Set reserve to 20%" and notifier.sent[-1][2] == "default"
+
+
+def test_override_is_acknowledged_once(tmp_path):
+    c, _, notifier = controller(tmp_path, live=True)
+    c.step(inputs(current_reserve=20.0), NOW)
+    c.step(inputs(current_reserve=50.0), NOW + 900)
+    c.step(inputs(current_reserve=50.0), NOW + 1800)
+    assert notifier.calls == ["Override seen: reserve at 50%"]
+
+
+def test_failed_write_is_announced(tmp_path):
+    def broken(level):
+        raise RuntimeError("403")
+
+    notifier = Recorder()
+    c = Controller(Store(str(tmp_path / "pw.db")), S, live=True, tz=TZ, writer=broken, notifier=notifier)
+    c.step(inputs(tomorrow_solar_kwh=10.0), NOW)
+    assert notifier.sent == [("Could not set reserve to 60%", "Setting the reserve failed: 403", "high")]

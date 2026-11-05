@@ -172,8 +172,14 @@ class Controller:
 
     def step(self, inputs: Inputs, now: int) -> dict:
         state = self.store.reserve_state()
+        paused_before = state.get("paused_until", 0)
         decision = decide(inputs, self.settings)
         outcome = self._outcome(decision, inputs, state, now)
+        if self.notifier and state.get("paused_until", 0) > max(paused_before, now - 1):
+            until = datetime.fromtimestamp(state["paused_until"], ZoneInfo(self.tz)).strftime("%a %H:%M")
+            self.notifier.send(f"Override seen: reserve at {inputs.current_reserve:.0f}%",
+                               f"You changed the reserve in the Tesla app, so I'll leave it alone until {until}.",
+                               "default", "raised_hand")
 
         if inputs.current_reserve is not None:
             state["last_observed"] = inputs.current_reserve
@@ -193,12 +199,22 @@ class Controller:
                                         outcome["action"], "live" if self.live else "dry-run",
                                         json.dumps({"reason": decision.reason, "note": outcome["note"],
                                                     "inputs": asdict(inputs)}))
-        if self.notifier and outcome["action"] in ("set", "would_set") and (
+        if self.notifier and outcome["action"] in ("set", "would_set", "failed") and (
                 not previous or previous["target"] != decision.target or previous["action"] != outcome["action"]):
-            verb = "Set" if outcome["action"] == "set" else "Would set"
-            self.notifier.send(f"{verb} reserve to {decision.target:.0f}%",
-                               f"Rule {decision.rule}: {decision.reason}", "low", "battery")
+            self._announce(decision, outcome)
         return {"decision": asdict(decision), **outcome}
+
+    def _announce(self, decision: Decision, outcome: dict) -> None:
+        """Storm and grid-emergency levels arrive as high priority, so they make a sound on the phone."""
+        target = decision.target
+        if outcome["action"] == "failed":
+            self.notifier.send(f"Could not set reserve to {target:.0f}%", outcome["note"], "high", "warning")
+            return
+        verb = "Set" if outcome["action"] == "set" else "Would set"
+        override = (f"To override, change the reserve in the Tesla app: I'll leave it alone for "
+                    f"{self.settings.manual_pause_hours:.0f} hours.") if self.live else "Dry-run: nothing was changed."
+        self.notifier.send(f"{verb} reserve to {target:.0f}%", f"{decision.reason}\n\n{override}",
+                           "high" if target >= self.settings.watch else "default", "battery")
 
     def preview(self, inputs: Inputs, now: int) -> dict:
         """What step() would do with these inputs, without saving, writing or notifying."""
