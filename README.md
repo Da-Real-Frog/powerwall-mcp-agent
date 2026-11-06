@@ -9,6 +9,7 @@ An AI workflow lab integrating Model Context Protocol (MCP), local Tesla Powerwa
 - `client/`: `chat.py`, an interactive terminal chat for asking Claude questions through the server's tools, and an agent client that discovers those tools, calls them, and recommends a backup reserve for the night. The LLM provider (Gemini or Claude) is selected in its `.env` file. See [client/README.md](client/README.md).
 - `web/`: Home Chat, a chat page for phones on the home Wi-Fi. It runs on percula, keeps the Claude API key there, and on an iPhone is added to the Home Screen like an app. See [web/README.md](web/README.md).
 - `bridge/`: Setting up a Raspberry Pi in the garage as a bridge so the server can reach the gateway's local API over its TEG Wi-Fi. See [bridge/README.md](bridge/README.md).
+- `watchdog/`: A daily noon check, run from that same Pi, of which containers percula is running and whether they answer, sent to ntfy. It runs off percula so it still reports when percula is down. See [watchdog/README.md](watchdog/README.md).
 - `server/site.toml`: The physical layout (arrays, panels, strings and Powerwall+ inputs) from the Tesla permit plans.
 - `.github/workflows/ci.yml`: Lint, unit tests and a secret scan on every pull request, on GitHub-hosted runners.
 - `.github/workflows/deploy.yml`: Rebuilds and restarts the server's Docker container on a self-hosted runner whenever `server/` changes on `main`; `deploy-web.yml` does the same for `web/`.
