@@ -1,0 +1,28 @@
+[project]
+name = "watchdog"
+version = "0.1.0"
+description = "Daily health check of percula's containers, run from the garage Pi"
+readme = "README.md"
+requires-python = ">=3.12"
+# Standard library only, so the image stays small on the Pi
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+]
+
+# watchdog.py is run directly; there is no package to build
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B"]

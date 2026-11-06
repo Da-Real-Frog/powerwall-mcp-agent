@@ -1,0 +1,9 @@
+# The real settings file holds the ntfy topic; only the example is committed
+watchdog.env
+*.env
+!watchdog.env.example
+
+.venv/
+**/__pycache__/
+*.pyc
+.DS_Store
