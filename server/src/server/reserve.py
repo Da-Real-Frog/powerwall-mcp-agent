@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 from . import ercot
 from .config import ReserveSettings
+from .powerwall import pypowerwall_errors
 from .storage import BUCKET, Store
 
 log = logging.getLogger(__name__)
@@ -304,19 +305,24 @@ def make_writer(get_local, get_cloud):
     The local /api/operation takes the gateway's raw scale (app % * 0.95 + 5); the cloud takes the app's.
     `get_local()` and `get_cloud()` return pypowerwall connections.
     """
+    def attempt(connect, value: float, refused: str) -> str | None:
+        """None when the write went through, otherwise why it didn't."""
+        with pypowerwall_errors() as messages:
+            try:
+                if connect().set_reserve(value) is not None:
+                    return None
+                reason = refused
+            except Exception as e:
+                reason = str(e)
+        return f"{reason} ({' / '.join(messages)})" if messages else reason
+
     def write(level: float) -> None:
-        try:
-            if get_local().set_reserve(round(level * 0.95 + 5, 1)) is not None:
-                return
-            local_error = "the gateway refused the change"
-        except Exception as e:
-            local_error = str(e)
+        local_error = attempt(get_local, round(level * 0.95 + 5, 1), "the gateway refused the change")
+        if local_error is None:
+            return
         log.warning("Local reserve write failed (%s); trying the cloud", local_error)
-        try:
-            if get_cloud().set_reserve(level) is not None:
-                return
-            cloud_error = "the cloud refused the change"
-        except Exception as e:
-            cloud_error = str(e)
+        cloud_error = attempt(get_cloud, level, "the cloud refused the change")
+        if cloud_error is None:
+            return
         raise RuntimeError(f"local: {local_error}; cloud: {cloud_error}")
     return write

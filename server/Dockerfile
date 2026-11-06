@@ -11,6 +11,8 @@ RUN uv sync --frozen --no-dev --no-install-project
 # Then the project itself and its site layout
 COPY src ./src
 COPY site.toml ./
+# The check scripts, so they can run inside the container with its settings
+COPY scripts ./scripts
 RUN uv sync --frozen --no-dev
 
 # pypowerwall keeps its login cache here; mount a volume on /data to keep it across restarts
