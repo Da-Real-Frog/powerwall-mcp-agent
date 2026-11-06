@@ -83,6 +83,11 @@ uv run scripts/check_forecast.py    # Per-array and total solar forecast
 uv run scripts/check_ercot.py       # ERCOT grid condition and how the controller reads it
 ```
 
+If a reserve write fails, check both write paths from inside the container, with its settings and login caches. It only reads unless you add `--write-test`, which writes the current reserve back to each path (no change) and prints why a path refused:
+```bash
+docker exec mcp-server uv run --no-sync python scripts/check_reserve_write.py --write-test
+```
+
 ## Tests
 ```bash
 uv run pytest

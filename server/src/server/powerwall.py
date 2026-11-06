@@ -1,7 +1,9 @@
 """One shared, lazily created connection to the local Powerwall gateway."""
+import logging
 import os
 import threading
 import time
+from contextlib import contextmanager
 
 import pypowerwall
 from pypowerwall.tedapi import TEDAPI
@@ -57,6 +59,28 @@ def read_status(pw) -> dict:
     if missing:
         raise PowerwallError(f"The gateway returned no value for: {', '.join(missing)}")
     return status
+
+
+@contextmanager
+def pypowerwall_errors():
+    """Collects the warnings and errors pypowerwall logs while the block runs.
+
+    pypowerwall returns None on a failed write and only logs why (a 403 from the gateway, a missing cloud
+    sign-in), so this is how the reason reaches the caller. Its messages hold URLs, never tokens.
+    """
+    messages: list[str] = []
+
+    class Collector(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            messages.append(record.getMessage())
+
+    handler = Collector(logging.WARNING)
+    logger = logging.getLogger("pypowerwall")
+    logger.addHandler(handler)
+    try:
+        yield messages
+    finally:
+        logger.removeHandler(handler)
 
 
 def get_cloud_connection() -> pypowerwall.Powerwall:

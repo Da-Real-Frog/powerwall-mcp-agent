@@ -247,3 +247,21 @@ def test_failed_write_is_announced(tmp_path):
     c = Controller(Store(str(tmp_path / "pw.db")), S, live=True, tz=TZ, writer=broken, notifier=notifier)
     c.step(inputs(tomorrow_solar_kwh=10.0), NOW)
     assert notifier.sent == [("Could not set reserve to 60%", "Setting the reserve failed: 403", "high")]
+
+
+def test_writer_reports_why_each_path_failed():
+    import logging
+
+    class Refusing:
+        def __init__(self, message):
+            self.message = message
+
+        def set_reserve(self, level):
+            logging.getLogger("pypowerwall").error(self.message)
+            return None
+
+    write = reserve.make_writer(lambda: Refusing("403 Unauthorized by Powerwall API"),
+                                lambda: Refusing("Missing auth file /data/.pypowerwall.auth - run setup"))
+    with pytest.raises(RuntimeError) as e:
+        write(60)
+    assert "403 Unauthorized" in str(e.value) and "Missing auth file" in str(e.value)
